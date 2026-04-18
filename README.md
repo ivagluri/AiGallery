@@ -4,6 +4,10 @@ AiGallery is a lightweight native macOS app for browsing AI-generated images fro
 
 It was built as a simple, fast, offline alternative to browser-based tools like `tagexplorer.github.io`. The goal is to keep the experience local and responsive: no web app, no server, no upload step, and no dependency on being online.
 
+## Screenshot
+
+![AiGallery screenshot](screenshot.png)
+
 ## What It Does
 
 AiGallery scans a root folder, treats subfolders as categories, and shows the images in a three-pane browser:
@@ -78,5 +82,4 @@ AiGallery is a local offline image browser for AI art folders. If you like the i
 This project was built with the help of AI coding tools, primarily Codex.
 I am not a professional developer, so this repository is a vibe coded personal solution, but someone else might find it useful too.
 If you decide to use it, expect there may be bugs, rough edges, or missing features.
-
 
