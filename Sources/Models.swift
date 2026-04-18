@@ -17,6 +17,29 @@ struct ImageItem: Identifiable, Hashable {
     let inferredTag: String
 }
 
+struct PNGInfo: Hashable {
+    let prompt: String?
+    let negativePrompt: String?
+    let generationParameters: [PNGTextEntry]
+    let textEntries: [PNGTextEntry]
+
+    var hasVisibleContent: Bool {
+        prompt?.isEmpty == false
+            || negativePrompt?.isEmpty == false
+            || !generationParameters.isEmpty
+            || !textEntries.isEmpty
+    }
+}
+
+struct PNGTextEntry: Hashable, Identifiable {
+    let keyword: String
+    let value: String
+
+    var id: String {
+        "\(keyword)\u{1F} \(value)"
+    }
+}
+
 struct CategoryGroup: Identifiable, Hashable {
     let id: String
     let name: String

@@ -9,6 +9,7 @@ final class LibraryStore: ObservableObject {
     @Published var errorMessage: String?
 
     private let fileManager = FileManager.default
+    private var pngInfoCache: [String: PNGInfo?] = [:]
 
     init() {
         self.rootURL = Self.defaultRootURL()
@@ -68,6 +69,7 @@ final class LibraryStore: ObservableObject {
             .filter { !$0.images.isEmpty }
 
             categories = loadedCategories
+            pngInfoCache.removeAll()
             selectedCategoryID = Self.validCategoryID(current: selectedCategoryID, categories: loadedCategories)
             selectedImageID = Self.validImageID(current: selectedImageID, categories: loadedCategories, selectedCategoryID: selectedCategoryID)
             errorMessage = nil
@@ -86,6 +88,16 @@ final class LibraryStore: ObservableObject {
 
     func selectImage(_ image: ImageItem?) {
         selectedImageID = image?.id
+    }
+
+    func pngInfo(for image: ImageItem) -> PNGInfo? {
+        if let cached = pngInfoCache[image.id] {
+            return cached
+        }
+
+        let info = PNGInfoReader.read(from: image.fileURL)
+        pngInfoCache[image.id] = info
+        return info
     }
 
     func chooseRootFolder() {

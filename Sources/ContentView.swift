@@ -4,6 +4,10 @@ import SwiftUI
 struct ContentView: View {
     @EnvironmentObject private var library: LibraryStore
     @State private var expandedGroupIDs: Set<String> = []
+    @State private var isImageInfoExpanded = true
+    @State private var isPNGInfoExpanded = true
+    @State private var isPNGPromptsExpanded = true
+    @State private var isPNGDetailsExpanded = true
 
     var body: some View {
         NavigationSplitView {
@@ -122,18 +126,50 @@ struct ContentView: View {
 
     private var inspector: some View {
         ScrollView {
-            if let category = library.selectedCategory, let image = library.selectedImage {
+            if let image = library.selectedImage {
+                let pngInfo = library.pngInfo(for: image)
+
                 VStack(alignment: .leading, spacing: 16) {
                     LargePreview(imageURL: image.fileURL)
                         .frame(maxWidth: .infinity)
 
-                    GroupBox("Image") {
-                        inspectorRow("Filename", image.fileURL.lastPathComponent)
+                    InspectorSection("Image", isExpanded: $isImageInfoExpanded) {
                         inspectorRow("Tag", image.inferredTag)
-                        inspectorRow("Category", category.shortName)
-                        inspectorRow("Root Group", category.rootGroupName)
-                        inspectorRow("Folder", category.folderURL.lastPathComponent)
+                        inspectorRow("Filename", image.fileURL.lastPathComponent)
                         inspectorRow("Path", image.fileURL.path)
+                    }
+
+                    if let pngInfo, pngInfo.hasVisibleContent {
+                        let additionalPNGEntries = pngInfo.textEntries.filter { entry in
+                            let keyword = entry.keyword.lowercased()
+                            return keyword != "parameters"
+                        }
+
+                        InspectorSection("PNG Info", isExpanded: $isPNGInfoExpanded) {
+                            if pngInfo.prompt != nil || pngInfo.negativePrompt != nil {
+                                NestedInspectorSection("Prompts", isExpanded: $isPNGPromptsExpanded) {
+                                    if let prompt = pngInfo.prompt {
+                                        inspectorRow("Prompt", prompt)
+                                    }
+
+                                    if let negativePrompt = pngInfo.negativePrompt {
+                                        inspectorRow("Negative Prompt", negativePrompt)
+                                    }
+                                }
+                            }
+
+                            if !pngInfo.generationParameters.isEmpty || !additionalPNGEntries.isEmpty {
+                                NestedInspectorSection("Details", isExpanded: $isPNGDetailsExpanded) {
+                                    ForEach(pngInfo.generationParameters) { parameter in
+                                        inspectorRow(parameter.keyword, parameter.value)
+                                    }
+
+                                    ForEach(additionalPNGEntries) { entry in
+                                        inspectorRow(humanReadablePNGLabel(for: entry.keyword), entry.value)
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
                 .padding(20)
@@ -163,6 +199,14 @@ struct ContentView: View {
                 library.selectCategory(category)
             }
         )
+    }
+
+    private func humanReadablePNGLabel(for keyword: String) -> String {
+        keyword
+            .replacingOccurrences(of: "_", with: " ")
+            .split(separator: " ")
+            .map { $0.lowercased().capitalized }
+            .joined(separator: " ")
     }
 
     private func expandAllGroupsIfNeeded() {
@@ -198,6 +242,58 @@ private struct ThumbnailCell: View {
                 .stroke(isSelected ? Color.accentColor : Color.clear, lineWidth: 1)
         )
         .contentShape(RoundedRectangle(cornerRadius: 12))
+    }
+}
+
+private struct InspectorSection<Content: View>: View {
+    let title: String
+    @Binding var isExpanded: Bool
+    @ViewBuilder let content: Content
+
+    init(_ title: String, isExpanded: Binding<Bool>, @ViewBuilder content: () -> Content) {
+        self.title = title
+        self._isExpanded = isExpanded
+        self.content = content()
+    }
+
+    var body: some View {
+        GroupBox {
+            DisclosureGroup(isExpanded: $isExpanded) {
+                VStack(alignment: .leading, spacing: 12) {
+                    content
+                }
+                .padding(.top, 8)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            } label: {
+                Text(title)
+                    .font(.headline)
+            }
+        }
+    }
+}
+
+private struct NestedInspectorSection<Content: View>: View {
+    let title: String
+    @Binding var isExpanded: Bool
+    @ViewBuilder let content: Content
+
+    init(_ title: String, isExpanded: Binding<Bool>, @ViewBuilder content: () -> Content) {
+        self.title = title
+        self._isExpanded = isExpanded
+        self.content = content()
+    }
+
+    var body: some View {
+        DisclosureGroup(isExpanded: $isExpanded) {
+            VStack(alignment: .leading, spacing: 12) {
+                content
+            }
+            .padding(.top, 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        } label: {
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+        }
     }
 }
 
