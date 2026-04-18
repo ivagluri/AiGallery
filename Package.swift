@@ -2,19 +2,19 @@
 import PackageDescription
 
 let package = Package(
-    name: "TagBrowser",
+    name: "AiGallery",
     platforms: [
         .macOS(.v13),
     ],
     products: [
         .executable(
-            name: "TagBrowser",
-            targets: ["TagBrowser"]
+            name: "AiGallery",
+            targets: ["AiGallery"]
         ),
     ],
     targets: [
         .executableTarget(
-            name: "TagBrowser",
+            name: "AiGallery",
             path: "Sources"
         ),
     ]

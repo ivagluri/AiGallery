@@ -1,7 +1,7 @@
 import SwiftUI
 
 @main
-struct TagBrowserApp: App {
+struct AiGalleryApp: App {
     @StateObject private var library = LibraryStore()
 
     var body: some Scene {

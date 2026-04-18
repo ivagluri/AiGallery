@@ -13,7 +13,7 @@ struct ContentView: View {
         } detail: {
             inspector
         }
-        .navigationTitle("Tag Browser")
+        .navigationTitle("AiGallery")
         .toolbar {
             ToolbarItemGroup {
                 Button("Reload") {
