@@ -5,12 +5,18 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APP_NAME="AiGallery"
 BUILD_CONFIG="${BUILD_CONFIG:-release}"
+VERSION="${VERSION:-}"
+OUTPUT_NAME="$APP_NAME"
+if [[ -n "$VERSION" ]]; then
+  OUTPUT_NAME="$APP_NAME-$VERSION"
+fi
 DIST_DIR="$ROOT_DIR/dist"
-APP_DIR="$DIST_DIR/$APP_NAME.app"
+APP_DIR="$DIST_DIR/$OUTPUT_NAME.app"
 CONTENTS_DIR="$APP_DIR/Contents"
 MACOS_DIR="$CONTENTS_DIR/MacOS"
 RESOURCES_DIR="$CONTENTS_DIR/Resources"
 PLIST_TEMPLATE="$ROOT_DIR/packaging/Info.plist"
+PLIST_PATH="$CONTENTS_DIR/Info.plist"
 APP_ICON_SOURCE="$ROOT_DIR/packaging/AppIcon.png"
 APP_ICON_NAME="AppIcon"
 MODULE_CACHE_DIR="$ROOT_DIR/.build/module-cache"
@@ -53,8 +59,13 @@ rm -rf "$APP_DIR"
 mkdir -p "$MACOS_DIR" "$RESOURCES_DIR"
 
 cp "$BIN_PATH" "$MACOS_DIR/$APP_NAME"
-cp "$PLIST_TEMPLATE" "$CONTENTS_DIR/Info.plist"
+cp "$PLIST_TEMPLATE" "$PLIST_PATH"
 printf 'APPL????' > "$CONTENTS_DIR/PkgInfo"
+
+if [[ -n "$VERSION" ]]; then
+  /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" "$PLIST_PATH"
+  /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $VERSION" "$PLIST_PATH"
+fi
 
 if [[ -f "$APP_ICON_SOURCE" ]]; then
   build_icns
@@ -67,6 +78,10 @@ fi
 echo
 echo "Created app bundle:"
 echo "  $APP_DIR"
+if [[ -n "$VERSION" ]]; then
+  echo "Version:"
+  echo "  $VERSION"
+fi
 echo
 echo "You can open it with:"
 echo "  open \"$APP_DIR\""
