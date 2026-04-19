@@ -192,9 +192,12 @@ struct ContentView: View {
                 VStack(alignment: .leading, spacing: 16) {
                     LargePreview(imageURL: image.fileURL)
                         .frame(maxWidth: .infinity)
+                        .overlay(alignment: .topTrailing) {
+                            previewFavoriteButton(for: image)
+                                .padding(12)
+                        }
 
                     InspectorSection("Image", isExpanded: $isImageInfoExpanded) {
-                        favoriteButton(for: image)
                         inspectorRow("Tag", image.inferredTag)
                         inspectorRow("Filename", image.fileURL.lastPathComponent)
                         inspectorRow("Path", image.fileURL.path)
@@ -323,33 +326,26 @@ struct ContentView: View {
     }
 
     private func categoryHeader(_ category: Category) -> some View {
-        HStack(spacing: 10) {
-            Text(category.name)
-                .font(.headline)
-                .lineLimit(1)
-                .truncationMode(.tail)
-                .help(category.name)
-
-            if let image = library.selectedImage {
-                favoriteButton(for: image)
-            }
-        }
+        Text(category.name)
+            .font(.headline)
+            .lineLimit(1)
+            .truncationMode(.tail)
+            .help(category.name)
     }
 
-    private func favoriteButton(for image: ImageItem) -> some View {
+    private func previewFavoriteButton(for image: ImageItem) -> some View {
         let isFavorite = library.isFavorite(image)
 
         return Button {
             library.toggleFavorite(image)
         } label: {
-            Label(
-                isFavorite ? "Remove Favorite" : "Add Favorite",
-                systemImage: isFavorite ? "star.fill" : "star"
-            )
-            .labelStyle(.iconOnly)
+            Image(systemName: isFavorite ? "star.fill" : "star")
+                .font(.title3.weight(.semibold))
+                .foregroundStyle(isFavorite ? Color.yellow : Color.white)
+                .padding(10)
+                .background(.black.opacity(0.4), in: Circle())
         }
-        .buttonStyle(.borderless)
-        .foregroundStyle(isFavorite ? Color.yellow : Color.secondary)
+        .buttonStyle(.plain)
         .help(isFavorite ? "Remove from Favorites" : "Add to Favorites")
     }
 
