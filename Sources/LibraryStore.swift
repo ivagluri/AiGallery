@@ -50,9 +50,10 @@ final class LibraryStore: ObservableObject {
         Dictionary(grouping: categories, by: \.rootGroupID)
             .values
             .map { groupedCategories in
-                let sortedCategories = groupedCategories.sorted {
-                    $0.shortName.localizedCaseInsensitiveCompare($1.shortName) == .orderedAscending
-                }
+                let sortedCategories = groupedCategories.sorted(by: { lhs, rhs in
+                    lhs.pathParts.map { $0.lowercased() }.joined(separator: "/")
+                        .localizedCaseInsensitiveCompare(rhs.pathParts.map { $0.lowercased() }.joined(separator: "/")) == .orderedAscending
+                })
                 let firstCategory = sortedCategories[0]
                 return CategoryGroup(
                     id: firstCategory.rootGroupID,
@@ -91,6 +92,7 @@ final class LibraryStore: ObservableObject {
                     id: categoryID,
                     name: Self.categoryName(for: pathParts),
                     shortName: Self.subcategoryName(for: pathParts),
+                    pathParts: pathParts,
                     rootGroupID: Self.rootGroupID(for: pathParts),
                     rootGroupName: Self.rootGroupName(for: pathParts),
                     folderURL: folderURL,
@@ -302,6 +304,7 @@ final class LibraryStore: ObservableObject {
             id: Self.favoritesCategoryID,
             name: "Favorites",
             shortName: "Saved Images",
+            pathParts: ["Favorites"],
             rootGroupID: Self.favoritesGroupID,
             rootGroupName: "Favorites",
             folderURL: rootURL,

@@ -127,44 +127,11 @@ struct ContentView: View {
 
     private var sidebar: some View {
         List {
-            ForEach(library.categoryGroups) { group in
+            ForEach(Array(library.categoryGroups.enumerated()), id: \.element.id) { index, group in
                 if group.isSynthetic, let category = group.categories.first, group.categories.count == 1 {
                     categoryRow(category, title: category.name, systemImage: "star.fill")
                 } else {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Button {
-                            toggleGroupExpansion(group.id)
-                        } label: {
-                            HStack(spacing: 8) {
-                                Image(systemName: isGroupExpanded(group.id) ? "chevron.down" : "chevron.right")
-                                    .font(.caption.weight(.semibold))
-                                    .foregroundStyle(.secondary)
-                                    .frame(width: 12)
-
-                                Text(group.name)
-                                    .font(.headline)
-
-                                Spacer()
-
-                                Text("\(group.categories.count)")
-                                    .foregroundStyle(.secondary)
-                            }
-                            .padding(.vertical, 4)
-                            .padding(.horizontal, 8)
-                            .contentShape(Rectangle())
-                            .background(
-                                RoundedRectangle(cornerRadius: 8)
-                                    .fill(isCollapsedActiveGroup(group) ? Color.accentColor.opacity(0.14) : Color.clear)
-                            )
-                        }
-                        .buttonStyle(.plain)
-
-                        if isGroupExpanded(group.id) {
-                            ForEach(group.categories) { category in
-                                categoryRow(category, title: category.shortName, systemImage: nil)
-                            }
-                        }
-                    }
+                    sidebarGroup(group, stripeIndex: index)
                 }
             }
         }
@@ -173,11 +140,120 @@ struct ContentView: View {
                 PlaceholderView(title: "No Categories", systemImage: "folder")
             }
         }
+        .listStyle(.plain)
         .disabled(isSearching)
         .navigationSplitViewColumnWidth(min: 180, ideal: 260, max: 420)
     }
 
-    private func categoryRow(_ category: Category, title: String, systemImage: String?) -> some View {
+    private func sidebarGroup(_ group: CategoryGroup, stripeIndex: Int) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Button {
+                toggleGroupExpansion(group.id)
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: isGroupExpanded(group.id) ? "chevron.down" : "chevron.right")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 12)
+
+                    Text(group.name)
+                        .font(.headline)
+
+                    Spacer()
+
+                    Text("\(group.categories.count)")
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.vertical, 4)
+                .padding(.horizontal, 8)
+                .contentShape(Rectangle())
+                .background(
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(isCollapsedActiveGroup(group) ? Color.accentColor.opacity(0.14) : Color.clear)
+                )
+            }
+            .buttonStyle(.plain)
+
+            if isGroupExpanded(group.id) {
+                ForEach(sidebarNodes(for: group)) { node in
+                    sidebarNodeRow(node, level: 1)
+                }
+            }
+        }
+        .padding(.vertical, 2)
+        .listRowInsets(EdgeInsets(top: 2, leading: 0, bottom: 2, trailing: 0))
+        .listRowBackground(sidebarStripeFill(for: stripeIndex))
+    }
+
+    private func sidebarNodeRow(_ node: SidebarNode, level: Int) -> AnyView {
+        AnyView(
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 4) {
+                    if node.hasChildren {
+                        Button {
+                            toggleGroupExpansion(node.id)
+                        } label: {
+                            Image(systemName: isGroupExpanded(node.id) ? "chevron.down" : "chevron.right")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                                .frame(width: 12, height: 12)
+                        }
+                        .buttonStyle(.plain)
+                    } else {
+                        Color.clear
+                            .frame(width: 12, height: 12)
+                    }
+
+                    if let category = node.category {
+                        categoryRow(
+                            category,
+                            title: node.title,
+                            systemImage: nil,
+                            isActiveOverride: isCollapsedActiveNode(node)
+                        )
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    } else {
+                        Button {
+                            toggleGroupExpansion(node.id)
+                        } label: {
+                            HStack {
+                                Text(node.title)
+                                    .lineLimit(2)
+                                Spacer()
+                                Text("\(node.children.count)")
+                                    .foregroundStyle(.secondary)
+                            }
+                            .padding(.vertical, 4)
+                            .padding(.horizontal, 8)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .fill(isCollapsedActiveNode(node) ? Color.accentColor.opacity(0.14) : Color.clear)
+                            )
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.leading, CGFloat(level) * 14)
+
+                if node.hasChildren && isGroupExpanded(node.id) {
+                    ForEach(node.children) { child in
+                        sidebarNodeRow(child, level: level + 1)
+                    }
+                }
+            }
+        )
+    }
+
+    private func categoryRow(
+        _ category: Category,
+        title: String,
+        systemImage: String?,
+        isActiveOverride: Bool = false
+    ) -> some View {
         Button {
             guard !isSearching else { return }
             library.selectCategory(category)
@@ -199,10 +275,12 @@ struct ContentView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
                 RoundedRectangle(cornerRadius: 8)
-                    .fill(category.id == library.selectedCategory?.id ? Color.accentColor.opacity(0.14) : Color.clear)
+                    .fill((category.id == library.selectedCategory?.id || isActiveOverride) ? Color.accentColor.opacity(0.14) : Color.clear)
             )
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .tag(category.id)
     }
 
@@ -579,6 +657,44 @@ struct ContentView: View {
             .joined(separator: " ")
     }
 
+    private func sidebarStripeFill(for stripeIndex: Int) -> Color {
+        guard stripeIndex.isMultiple(of: 2) else {
+            return Color.clear
+        }
+
+        return Color.primary.opacity(colorScheme == .dark ? 0.018 : 0.012)
+    }
+
+    private func sidebarNodes(for group: CategoryGroup) -> [SidebarNode] {
+        var nodes: [SidebarNode] = []
+
+        for category in group.categories {
+            let relativePath = Array(category.pathParts.dropFirst())
+
+            if relativePath.isEmpty {
+                nodes.append(
+                    SidebarNode(
+                        id: "\(group.id)/__overview__",
+                        title: "Overview",
+                        pathParts: category.pathParts,
+                        category: category,
+                        children: []
+                    )
+                )
+                continue
+            }
+
+            insertSidebarNode(
+                category: category,
+                remainingParts: relativePath,
+                accumulatedPath: [group.id],
+                nodes: &nodes
+            )
+        }
+
+        return sortSidebarNodes(nodes)
+    }
+
     private func isGroupExpanded(_ groupID: String) -> Bool {
         expandedGroupIDs.contains(groupID)
     }
@@ -586,6 +702,18 @@ struct ContentView: View {
     private func isCollapsedActiveGroup(_ group: CategoryGroup) -> Bool {
         guard !isGroupExpanded(group.id) else { return false }
         return library.selectedCategory?.rootGroupID == group.id
+    }
+
+    private func isCollapsedActiveNode(_ node: SidebarNode) -> Bool {
+        guard node.hasChildren, !isGroupExpanded(node.id), let selectedCategory = library.selectedCategory else {
+            return false
+        }
+
+        if node.category?.id == selectedCategory.id {
+            return false
+        }
+
+        return selectedCategory.pathParts.starts(with: node.pathParts)
     }
 
     private func toggleGroupExpansion(_ groupID: String) {
@@ -597,9 +725,86 @@ struct ContentView: View {
     }
 
     private func expandAllGroupsIfNeeded() {
-        if expandedGroupIDs.isEmpty {
-            expandedGroupIDs = Set(library.categoryGroups.map(\.id))
+        let expandableNodeIDs = Set(allExpandableNodeIDs())
+        expandedGroupIDs = expandedGroupIDs.intersection(expandableNodeIDs)
+
+        let topLevelGroupIDs = Set(library.categoryGroups.filter { !$0.isSynthetic }.map(\.id))
+        if expandedGroupIDs.isEmpty || expandedGroupIDs.intersection(topLevelGroupIDs).isEmpty {
+            expandedGroupIDs = expandableNodeIDs
         }
+    }
+
+    private func allExpandableNodeIDs() -> [String] {
+        library.categoryGroups.reduce(into: [String]()) { result, group in
+            guard !group.isSynthetic else { return }
+            result.append(group.id)
+            result.append(contentsOf: expandableNodeIDs(in: sidebarNodes(for: group)))
+        }
+    }
+
+    private func expandableNodeIDs(in nodes: [SidebarNode]) -> [String] {
+        nodes.reduce(into: [String]()) { result, node in
+            guard node.hasChildren else { return }
+            result.append(node.id)
+            result.append(contentsOf: expandableNodeIDs(in: node.children))
+        }
+    }
+
+    private func insertSidebarNode(
+        category: Category,
+        remainingParts: [String],
+        accumulatedPath: [String],
+        nodes: inout [SidebarNode]
+    ) {
+        guard let nextPart = remainingParts.first else { return }
+
+        let currentPath = accumulatedPath + [nextPart]
+        let nodeID = currentPath.joined(separator: "/")
+
+        let nodeIndex = nodes.firstIndex(where: { $0.id == nodeID }) ?? {
+            nodes.append(
+                SidebarNode(
+                    id: nodeID,
+                    title: displayTitle(for: nextPart),
+                    pathParts: currentPath,
+                    category: nil,
+                    children: []
+                )
+            )
+            return nodes.endIndex - 1
+        }()
+
+        if remainingParts.count == 1 {
+            nodes[nodeIndex].category = category
+        } else {
+            insertSidebarNode(
+                category: category,
+                remainingParts: Array(remainingParts.dropFirst()),
+                accumulatedPath: currentPath,
+                nodes: &nodes[nodeIndex].children
+            )
+        }
+    }
+
+    private func sortSidebarNodes(_ nodes: [SidebarNode]) -> [SidebarNode] {
+        nodes
+            .map { node in
+                var updatedNode = node
+                updatedNode.children = sortSidebarNodes(node.children)
+                return updatedNode
+            }
+            .sorted { lhs, rhs in
+                if lhs.title == "Overview" || rhs.title == "Overview" {
+                    return lhs.title == "Overview"
+                }
+                return lhs.title.localizedCaseInsensitiveCompare(rhs.title) == .orderedAscending
+            }
+    }
+
+    private func displayTitle(for slug: String) -> String {
+        slug
+            .replacingOccurrences(of: "_", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private var trimmedSearchText: String {
@@ -739,6 +944,18 @@ struct ContentView: View {
 private struct BrowseSelection {
     let categoryID: Category.ID?
     let imageID: ImageItem.ID?
+}
+
+private struct SidebarNode: Identifiable, Hashable {
+    let id: String
+    let title: String
+    let pathParts: [String]
+    var category: Category?
+    var children: [SidebarNode]
+
+    var hasChildren: Bool {
+        !children.isEmpty
+    }
 }
 
 private struct InspectorSplitView<Primary: View, Inspector: View>: NSViewControllerRepresentable {

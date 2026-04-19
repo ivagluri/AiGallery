@@ -4,6 +4,7 @@ struct Category: Identifiable, Hashable {
     let id: String
     let name: String
     let shortName: String
+    let pathParts: [String]
     let rootGroupID: String
     let rootGroupName: String
     let folderURL: URL
