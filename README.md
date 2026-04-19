@@ -44,6 +44,23 @@ The app supports common image types including:
 - `jpeg`
 - `webp`
 
+## Tags
+
+For custom libraries, each image should generally represent a single tag or concept.
+The app uses the filename as the displayed tag label, replacing underscores with spaces.
+
+```text
+Artists/
+    Illustrious/
+        artist1.png
+        artist2.png
+Poses/
+    arms/
+        one_arm_up.png
+        crossed_arms.png
+```
+
+
 ## Folder Metadata Files
 
 For formats that do not carry PNG-style embedded metadata well, such as large `.webp` sample sets, you can drop a simple metadata file into a category folder. AiGallery will use it as a fallback for every image in that folder.
@@ -93,10 +110,10 @@ Embedded PNG metadata still takes priority, but folder metadata fills in the ins
 
 You can use AiGallery in two main ways:
 
-1. Point it at your own folder of AI-generated images, arranged in the folder structure described above.
+1. Point it at your own folder of AI-generated images, arranged in the folder and filename structure described above.
 2. Use the existing `gens` folder from the https://github.com/tagexplorer/tagexplorer.github.io repo, which is how the app was originally developed and tested, and supports that specific folder structure.
 
-When the app launches, it will try to use a local `gens` folder if one exists. During development that means `gens` beside the project; in a packaged `.app` it also checks for `gens` next to the app bundle. If no `gens` folder is found, the app starts empty and you can click `Choose Folder…` at any time to select a library.
+When the app launches, it will try to use a local `gens` folder if one exists, and checks for `gens` in the same folder as the app. If no `gens` folder is found, the app starts empty and you can click `Choose Folder…` at any time to select a library.
 
 - The app bundle is unsigned. On most Macs, Gatekeeper will likely not let you open it just by double click.  macOS Sonoma removed the keyboard shortcut to bypass this so you now are forced to approve it in system settings>privacy.  Or the command line xattr method  still works.
 

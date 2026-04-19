@@ -72,47 +72,37 @@ struct ContentView: View {
     private var sidebar: some View {
         List(selection: categorySelectionBinding) {
             ForEach(library.categoryGroups) { group in
-                DisclosureGroup(
-                    isExpanded: Binding(
-                        get: { expandedGroupIDs.contains(group.id) },
-                        set: { isExpanded in
-                            if isExpanded {
-                                expandedGroupIDs.insert(group.id)
+                if group.isSynthetic, let category = group.categories.first, group.categories.count == 1 {
+                    categoryRow(category, title: category.name, systemImage: "star.fill")
+                } else {
+                    DisclosureGroup(
+                        isExpanded: Binding(
+                            get: { expandedGroupIDs.contains(group.id) },
+                            set: { isExpanded in
+                                if isExpanded {
+                                    expandedGroupIDs.insert(group.id)
+                                } else {
+                                    expandedGroupIDs.remove(group.id)
+                                }
+                            }
+                        )
+                    ) {
+                        ForEach(group.categories) { category in
+                            categoryRow(category, title: category.shortName, systemImage: nil)
+                        }
+                    } label: {
+                        HStack {
+                            if group.isSynthetic {
+                                Label(group.name, systemImage: "star.fill")
+                                    .font(.headline)
                             } else {
-                                expandedGroupIDs.remove(group.id)
+                                Text(group.name)
+                                    .font(.headline)
                             }
+                            Spacer()
+                            Text("\(group.categories.count)")
+                                .foregroundStyle(.secondary)
                         }
-                    )
-                ) {
-                    ForEach(group.categories) { category in
-                        Button {
-                            library.selectCategory(category)
-                        } label: {
-                            HStack {
-                                Text(category.shortName)
-                                    .lineLimit(2)
-                                Spacer()
-                                Text("\(category.images.count)")
-                                    .foregroundStyle(.secondary)
-                            }
-                            .padding(.vertical, 4)
-                            .padding(.horizontal, 8)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(
-                                RoundedRectangle(cornerRadius: 8)
-                                    .fill(category.id == library.selectedCategory?.id ? Color.accentColor.opacity(0.14) : Color.clear)
-                            )
-                        }
-                        .buttonStyle(.plain)
-                        .tag(category.id)
-                    }
-                } label: {
-                    HStack {
-                        Text(group.name)
-                            .font(.headline)
-                        Spacer()
-                        Text("\(group.categories.count)")
-                            .foregroundStyle(.secondary)
                     }
                 }
             }
@@ -123,6 +113,34 @@ struct ContentView: View {
             }
         }
         .navigationSplitViewColumnWidth(min: 180, ideal: 260, max: 420)
+    }
+
+    private func categoryRow(_ category: Category, title: String, systemImage: String?) -> some View {
+        Button {
+            library.selectCategory(category)
+        } label: {
+            HStack {
+                if let systemImage {
+                    Label(title, systemImage: systemImage)
+                        .lineLimit(2)
+                } else {
+                    Text(title)
+                        .lineLimit(2)
+                }
+                Spacer()
+                Text("\(category.images.count)")
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.vertical, 4)
+            .padding(.horizontal, 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(category.id == library.selectedCategory?.id ? Color.accentColor.opacity(0.14) : Color.clear)
+            )
+        }
+        .buttonStyle(.plain)
+        .tag(category.id)
     }
 
     private var thumbnailGrid: some View {
@@ -140,7 +158,11 @@ struct ContentView: View {
                                 ThumbnailCell(
                                     image: image,
                                     isSelected: image.id == library.selectedImage?.id,
-                                    thumbnailHeight: thumbnailSize
+                                    thumbnailHeight: thumbnailSize,
+                                    isFavorite: library.isFavorite(image),
+                                    onToggleFavorite: {
+                                        library.toggleFavorite(image)
+                                    }
                                 )
                                 .onTapGesture {
                                     library.selectImage(image)
@@ -172,6 +194,7 @@ struct ContentView: View {
                         .frame(maxWidth: .infinity)
 
                     InspectorSection("Image", isExpanded: $isImageInfoExpanded) {
+                        favoriteButton(for: image)
                         inspectorRow("Tag", image.inferredTag)
                         inspectorRow("Filename", image.fileURL.lastPathComponent)
                         inspectorRow("Path", image.fileURL.path)
@@ -300,11 +323,34 @@ struct ContentView: View {
     }
 
     private func categoryHeader(_ category: Category) -> some View {
-        Text(category.name)
-            .font(.headline)
-            .lineLimit(1)
-            .truncationMode(.tail)
-            .help(category.name)
+        HStack(spacing: 10) {
+            Text(category.name)
+                .font(.headline)
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .help(category.name)
+
+            if let image = library.selectedImage {
+                favoriteButton(for: image)
+            }
+        }
+    }
+
+    private func favoriteButton(for image: ImageItem) -> some View {
+        let isFavorite = library.isFavorite(image)
+
+        return Button {
+            library.toggleFavorite(image)
+        } label: {
+            Label(
+                isFavorite ? "Remove Favorite" : "Add Favorite",
+                systemImage: isFavorite ? "star.fill" : "star"
+            )
+            .labelStyle(.iconOnly)
+        }
+        .buttonStyle(.borderless)
+        .foregroundStyle(isFavorite ? Color.yellow : Color.secondary)
+        .help(isFavorite ? "Remove from Favorites" : "Add to Favorites")
     }
 
     private var sortButton: some View {
@@ -377,14 +423,28 @@ private struct ThumbnailCell: View {
     let image: ImageItem
     let isSelected: Bool
     let thumbnailHeight: Double
+    let isFavorite: Bool
+    let onToggleFavorite: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            ThumbnailImage(imageURL: image.fileURL)
-                .frame(height: thumbnailHeight)
-                .frame(maxWidth: .infinity)
-                .background(Color(nsColor: .windowBackgroundColor))
-                .clipShape(RoundedRectangle(cornerRadius: 10))
+            ZStack(alignment: .topTrailing) {
+                ThumbnailImage(imageURL: image.fileURL)
+                    .frame(height: thumbnailHeight)
+                    .frame(maxWidth: .infinity)
+                    .background(Color(nsColor: .windowBackgroundColor))
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+
+                Button(action: onToggleFavorite) {
+                    Image(systemName: isFavorite ? "star.fill" : "star")
+                        .font(.headline)
+                        .foregroundStyle(isFavorite ? Color.yellow : Color.white)
+                        .padding(8)
+                        .background(.black.opacity(0.35), in: Circle())
+                }
+                .buttonStyle(.plain)
+                .padding(8)
+            }
 
             Text(image.inferredTag)
                 .font(.subheadline)

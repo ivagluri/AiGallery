@@ -12,7 +12,12 @@ final class LibraryStore: ObservableObject {
     private let userDefaults: UserDefaults
     private var pngInfoCache: [String: PNGInfo?] = [:]
     private var folderMetadataCache: [String: FolderMetadata?] = [:]
+    private var sourceCategories: [Category] = []
+    private var favoriteImageIDs: Set<String>
     private static let selectedCategoryDefaultsKey = "selectedCategoryID"
+    private static let favoriteImageIDsDefaultsKey = "favoriteImageIDs"
+    private static let favoritesCategoryID = "__favorites__"
+    private static let favoritesGroupID = "__favorites__"
 
     init(userDefaults: UserDefaults = .standard) {
         self.userDefaults = userDefaults
@@ -20,11 +25,13 @@ final class LibraryStore: ObservableObject {
         let fallbackRootURL = FileManager.default.homeDirectoryForCurrentUser
         self.rootURL = defaultRootURL ?? fallbackRootURL
         self.selectedCategoryID = userDefaults.string(forKey: Self.selectedCategoryDefaultsKey)
+        self.favoriteImageIDs = Set(userDefaults.stringArray(forKey: Self.favoriteImageIDsDefaultsKey) ?? [])
 
         if defaultRootURL != nil {
             reload()
         } else {
             categories = []
+            sourceCategories = []
             persistSelectedCategoryID(nil)
             selectedImageID = nil
             errorMessage = nil
@@ -46,10 +53,16 @@ final class LibraryStore: ObservableObject {
                 return CategoryGroup(
                     id: firstCategory.rootGroupID,
                     name: firstCategory.rootGroupName,
-                    categories: sortedCategories
+                    categories: sortedCategories,
+                    isSynthetic: firstCategory.isSynthetic
                 )
             }
-            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+            .sorted { lhs, rhs in
+                if lhs.isSynthetic != rhs.isSynthetic {
+                    return lhs.isSynthetic
+                }
+                return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
+            }
     }
 
     var selectedImage: ImageItem? {
@@ -73,20 +86,24 @@ final class LibraryStore: ObservableObject {
                     rootGroupID: Self.rootGroupID(for: pathParts),
                     rootGroupName: Self.rootGroupName(for: pathParts),
                     folderURL: folderURL,
-                    images: images
+                    images: images,
+                    isSynthetic: false
                 )
             }
             .filter { !$0.images.isEmpty }
 
-            categories = loadedCategories
+            sourceCategories = loadedCategories
             pngInfoCache.removeAll()
             folderMetadataCache.removeAll()
-            selectedCategoryID = Self.validCategoryID(current: selectedCategoryID, categories: loadedCategories)
+            pruneFavoritesToExistingImages()
+            rebuildCategories()
+            selectedCategoryID = Self.validCategoryID(current: selectedCategoryID, categories: categories)
             persistSelectedCategoryID(selectedCategoryID)
-            selectedImageID = Self.validImageID(current: selectedImageID, categories: loadedCategories, selectedCategoryID: selectedCategoryID)
+            selectedImageID = Self.validImageID(current: selectedImageID, categories: categories, selectedCategoryID: selectedCategoryID)
             errorMessage = nil
         } catch {
             categories = []
+            sourceCategories = []
             persistSelectedCategoryID(nil)
             selectedImageID = nil
             errorMessage = error.localizedDescription
@@ -101,6 +118,24 @@ final class LibraryStore: ObservableObject {
 
     func selectImage(_ image: ImageItem?) {
         selectedImageID = image?.id
+    }
+
+    func isFavorite(_ image: ImageItem) -> Bool {
+        favoriteImageIDs.contains(image.id)
+    }
+
+    func toggleFavorite(_ image: ImageItem) {
+        if favoriteImageIDs.contains(image.id) {
+            favoriteImageIDs.remove(image.id)
+        } else {
+            favoriteImageIDs.insert(image.id)
+        }
+
+        persistFavoriteImageIDs()
+        rebuildCategories()
+        selectedCategoryID = Self.validCategoryID(current: selectedCategoryID, categories: categories)
+        persistSelectedCategoryID(selectedCategoryID)
+        selectedImageID = Self.validImageID(current: selectedImageID, categories: categories, selectedCategoryID: selectedCategoryID)
     }
 
     func pngInfo(for image: ImageItem) -> PNGInfo? {
@@ -195,6 +230,40 @@ final class LibraryStore: ObservableObject {
         return merged
     }
 
+    private func rebuildCategories() {
+        let favoriteImages = sourceCategories
+            .flatMap(\.images)
+            .filter { favoriteImageIDs.contains($0.id) }
+            .sorted { $0.inferredTag.localizedCaseInsensitiveCompare($1.inferredTag) == .orderedAscending }
+
+        if favoriteImages.isEmpty {
+            categories = sourceCategories
+            return
+        }
+
+        let favoritesCategory = Category(
+            id: Self.favoritesCategoryID,
+            name: "Favorites",
+            shortName: "Saved Images",
+            rootGroupID: Self.favoritesGroupID,
+            rootGroupName: "Favorites",
+            folderURL: rootURL,
+            images: favoriteImages,
+            isSynthetic: true
+        )
+
+        categories = [favoritesCategory] + sourceCategories
+    }
+
+    private func pruneFavoritesToExistingImages() {
+        let validImageIDs = Set(sourceCategories.flatMap(\.images).map(\.id))
+        let filteredFavoriteImageIDs = favoriteImageIDs.intersection(validImageIDs)
+
+        guard filteredFavoriteImageIDs != favoriteImageIDs else { return }
+        favoriteImageIDs = filteredFavoriteImageIDs
+        persistFavoriteImageIDs()
+    }
+
     private func persistSelectedCategoryID(_ categoryID: Category.ID?) {
         selectedCategoryID = categoryID
 
@@ -203,6 +272,10 @@ final class LibraryStore: ObservableObject {
         } else {
             userDefaults.removeObject(forKey: Self.selectedCategoryDefaultsKey)
         }
+    }
+
+    private func persistFavoriteImageIDs() {
+        userDefaults.set(Array(favoriteImageIDs).sorted(), forKey: Self.favoriteImageIDsDefaultsKey)
     }
 
     private func discoverCategoryFolders() throws -> [URL] {
