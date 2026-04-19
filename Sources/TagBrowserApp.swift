@@ -8,7 +8,7 @@ struct AiGalleryApp: App {
         WindowGroup {
             ContentView()
                 .environmentObject(library)
-                .frame(minWidth: 1100, minHeight: 700)
+                .frame(minWidth: 900, minHeight: 640)
         }
         .defaultSize(width: 1500, height: 920)
         .windowStyle(.titleBar)

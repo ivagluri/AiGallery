@@ -3,6 +3,9 @@ import SwiftUI
 
 struct ContentView: View {
     @EnvironmentObject private var library: LibraryStore
+    @AppStorage("showInspector") private var showInspector = true
+    @AppStorage("imageSortOrder") private var imageSortOrderRawValue = ImageSortOrder.alphabeticalAscending.rawValue
+    @AppStorage("thumbnailSizeIndex") private var thumbnailSizeIndex = 2
     @State private var expandedGroupIDs: Set<String> = []
     @State private var isImageInfoExpanded = true
     @State private var isPNGInfoExpanded = true
@@ -12,21 +15,35 @@ struct ContentView: View {
     var body: some View {
         NavigationSplitView {
             sidebar
-        } content: {
-            thumbnailGrid
         } detail: {
-            inspector
+            contentArea
         }
         .navigationTitle("AiGallery")
         .toolbar {
             ToolbarItemGroup {
-                Button("Reload") {
+                Button {
                     library.reload()
+                } label: {
+                    Label("Reload", systemImage: "arrow.clockwise")
                 }
+                .labelStyle(.iconOnly)
+                .help("Reload Library")
 
-                Button("Choose Folder…") {
+                Button {
                     library.chooseRootFolder()
+                } label: {
+                    Label("Choose Folder", systemImage: "folder")
                 }
+                .labelStyle(.iconOnly)
+                .help("Choose Image Root")
+
+                Button {
+                    showInspector.toggle()
+                } label: {
+                    Label(showInspector ? "Hide Info" : "Show Info", systemImage: showInspector ? "info.circle.fill" : "info.circle")
+                }
+                .labelStyle(.iconOnly)
+                .help(showInspector ? "Hide Info" : "Show Info")
             }
         }
         .onAppear {
@@ -34,6 +51,21 @@ struct ContentView: View {
         }
         .onChange(of: library.categoryGroups.map(\.id)) { _ in
             expandAllGroupsIfNeeded()
+        }
+    }
+
+    private var contentArea: some View {
+        Group {
+            if showInspector {
+                HSplitView {
+                    thumbnailGrid
+                        .frame(minWidth: 320, idealWidth: 820, maxWidth: .infinity)
+                    inspector
+                        .frame(minWidth: 240, idealWidth: 360, maxWidth: .infinity)
+                }
+            } else {
+                thumbnailGrid
+            }
         }
     }
 
@@ -90,28 +122,33 @@ struct ContentView: View {
                 PlaceholderView(title: "No Categories", systemImage: "folder")
             }
         }
-        .navigationSplitViewColumnWidth(min: 220, ideal: 280, max: 360)
+        .navigationSplitViewColumnWidth(min: 180, ideal: 260, max: 420)
     }
 
     private var thumbnailGrid: some View {
         Group {
             if let category = library.selectedCategory {
-                ScrollView {
-                    LazyVGrid(
-                        columns: [GridItem(.adaptive(minimum: 140, maximum: 200), spacing: 16)],
-                        spacing: 16
-                    ) {
-                        ForEach(category.images) { image in
-                            ThumbnailCell(
-                                image: image,
-                                isSelected: image.id == library.selectedImage?.id
-                            )
-                            .onTapGesture {
-                                library.selectImage(image)
+                VStack(spacing: 0) {
+                    gridControls(for: category)
+
+                    ScrollView {
+                        LazyVGrid(
+                            columns: [GridItem(.adaptive(minimum: thumbnailSize, maximum: thumbnailSize + 40), spacing: 16)],
+                            spacing: 16
+                        ) {
+                            ForEach(sortedImages(for: category)) { image in
+                                ThumbnailCell(
+                                    image: image,
+                                    isSelected: image.id == library.selectedImage?.id,
+                                    thumbnailHeight: thumbnailSize
+                                )
+                                .onTapGesture {
+                                    library.selectImage(image)
+                                }
                             }
                         }
+                        .padding(20)
                     }
-                    .padding(20)
                 }
             } else if let errorMessage = library.errorMessage {
                 PlaceholderView(
@@ -123,7 +160,6 @@ struct ContentView: View {
                 PlaceholderView(title: "Choose a Category", systemImage: "photo.on.rectangle")
             }
         }
-        .navigationSplitViewColumnWidth(min: 420, ideal: 760)
     }
 
     private var inspector: some View {
@@ -179,7 +215,6 @@ struct ContentView: View {
                 PlaceholderView(title: "Choose an Image", systemImage: "sidebar.right")
             }
         }
-        .navigationSplitViewColumnWidth(min: 280, ideal: 380, max: 520)
     }
 
     private func inspectorRow(_ label: String, _ value: String) -> some View {
@@ -204,6 +239,123 @@ struct ContentView: View {
         )
     }
 
+    private var imageSortOrder: ImageSortOrder {
+        get { ImageSortOrder(rawValue: imageSortOrderRawValue) ?? .alphabeticalAscending }
+        nonmutating set { imageSortOrderRawValue = newValue.rawValue }
+    }
+
+    private var thumbnailSize: Double {
+        Self.thumbnailSizes[clampedThumbnailSizeIndex]
+    }
+
+    private var thumbnailSizeSliderBinding: Binding<Double> {
+        Binding(
+            get: { Double(clampedThumbnailSizeIndex) },
+            set: { newValue in
+                thumbnailSizeIndex = min(max(Int(newValue.rounded()), 0), Self.thumbnailSizes.count - 1)
+            }
+        )
+    }
+
+    private var clampedThumbnailSizeIndex: Int {
+        min(max(thumbnailSizeIndex, 0), Self.thumbnailSizes.count - 1)
+    }
+
+    private func gridControls(for category: Category) -> some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 16) {
+                categoryHeader(category)
+
+                Spacer(minLength: 12)
+
+                sortButton
+                thumbnailSizeControl
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            VStack(alignment: .leading, spacing: 12) {
+                categoryHeader(category)
+
+                HStack(spacing: 16) {
+                    sortButton
+                    Spacer(minLength: 8)
+                    thumbnailSizeControl
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            VStack(alignment: .leading, spacing: 12) {
+                categoryHeader(category)
+
+                sortButton
+
+                thumbnailSizeControl
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background(Color(nsColor: .controlBackgroundColor).opacity(0.35))
+    }
+
+    private func categoryHeader(_ category: Category) -> some View {
+        Text(category.name)
+            .font(.headline)
+            .lineLimit(1)
+            .truncationMode(.tail)
+            .help(category.name)
+    }
+
+    private var sortButton: some View {
+        Button {
+            imageSortOrder = imageSortOrder.toggled
+        } label: {
+            Label(imageSortOrder.helpText, systemImage: imageSortOrder.systemImage)
+        }
+        .labelStyle(.iconOnly)
+        .help(imageSortOrder.helpText)
+    }
+
+    private var thumbnailSizeControl: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "square.grid.2x2")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            Slider(
+                value: thumbnailSizeSliderBinding,
+                in: 0...Double(Self.thumbnailSizes.count - 1),
+                step: 1
+            )
+            .frame(width: 140)
+
+            Image(systemName: "square.grid.3x3.fill")
+                .font(.title3)
+                .foregroundStyle(.secondary)
+        }
+        .help("Adjust thumbnail size")
+    }
+
+    private func sortedImages(for category: Category) -> [ImageItem] {
+        category.images.sorted { lhs, rhs in
+            let comparison = lhs.inferredTag.localizedCaseInsensitiveCompare(rhs.inferredTag)
+
+            switch imageSortOrder {
+            case .alphabeticalAscending:
+                if comparison == .orderedSame {
+                    return lhs.displayName.localizedCaseInsensitiveCompare(rhs.displayName) == .orderedAscending
+                }
+                return comparison == .orderedAscending
+            case .alphabeticalDescending:
+                if comparison == .orderedSame {
+                    return lhs.displayName.localizedCaseInsensitiveCompare(rhs.displayName) == .orderedDescending
+                }
+                return comparison == .orderedDescending
+            }
+        }
+    }
+
     private func humanReadablePNGLabel(for keyword: String) -> String {
         keyword
             .replacingOccurrences(of: "_", with: " ")
@@ -217,16 +369,19 @@ struct ContentView: View {
             expandedGroupIDs = Set(library.categoryGroups.map(\.id))
         }
     }
+
+    private static let thumbnailSizes: [Double] = [100, 120, 150, 185, 225, 260, 300]
 }
 
 private struct ThumbnailCell: View {
     let image: ImageItem
     let isSelected: Bool
+    let thumbnailHeight: Double
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             ThumbnailImage(imageURL: image.fileURL)
-                .frame(height: 140)
+                .frame(height: thumbnailHeight)
                 .frame(maxWidth: .infinity)
                 .background(Color(nsColor: .windowBackgroundColor))
                 .clipShape(RoundedRectangle(cornerRadius: 10))
@@ -245,6 +400,40 @@ private struct ThumbnailCell: View {
                 .stroke(isSelected ? Color.accentColor : Color.clear, lineWidth: 1)
         )
         .contentShape(RoundedRectangle(cornerRadius: 12))
+    }
+}
+
+private enum ImageSortOrder: String, CaseIterable, Identifiable {
+    case alphabeticalAscending
+    case alphabeticalDescending
+
+    var id: String { rawValue }
+
+    var helpText: String {
+        switch self {
+        case .alphabeticalAscending:
+            return "Sort: A to Z"
+        case .alphabeticalDescending:
+            return "Sort: Z to A"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .alphabeticalAscending:
+            return "arrow.down.circle"
+        case .alphabeticalDescending:
+            return "arrow.up.circle"
+        }
+    }
+
+    var toggled: ImageSortOrder {
+        switch self {
+        case .alphabeticalAscending:
+            return .alphabeticalDescending
+        case .alphabeticalDescending:
+            return .alphabeticalAscending
+        }
     }
 }
 
