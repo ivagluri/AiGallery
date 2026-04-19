@@ -9,19 +9,23 @@ final class LibraryStore: ObservableObject {
     @Published var errorMessage: String?
 
     private let fileManager = FileManager.default
+    private let userDefaults: UserDefaults
     private var pngInfoCache: [String: PNGInfo?] = [:]
     private var folderMetadataCache: [String: FolderMetadata?] = [:]
+    private static let selectedCategoryDefaultsKey = "selectedCategoryID"
 
-    init() {
+    init(userDefaults: UserDefaults = .standard) {
+        self.userDefaults = userDefaults
         let defaultRootURL = Self.defaultRootURL()
         let fallbackRootURL = FileManager.default.homeDirectoryForCurrentUser
         self.rootURL = defaultRootURL ?? fallbackRootURL
+        self.selectedCategoryID = userDefaults.string(forKey: Self.selectedCategoryDefaultsKey)
 
         if defaultRootURL != nil {
             reload()
         } else {
             categories = []
-            selectedCategoryID = nil
+            persistSelectedCategoryID(nil)
             selectedImageID = nil
             errorMessage = nil
         }
@@ -78,11 +82,12 @@ final class LibraryStore: ObservableObject {
             pngInfoCache.removeAll()
             folderMetadataCache.removeAll()
             selectedCategoryID = Self.validCategoryID(current: selectedCategoryID, categories: loadedCategories)
+            persistSelectedCategoryID(selectedCategoryID)
             selectedImageID = Self.validImageID(current: selectedImageID, categories: loadedCategories, selectedCategoryID: selectedCategoryID)
             errorMessage = nil
         } catch {
             categories = []
-            selectedCategoryID = nil
+            persistSelectedCategoryID(nil)
             selectedImageID = nil
             errorMessage = error.localizedDescription
         }
@@ -90,6 +95,7 @@ final class LibraryStore: ObservableObject {
 
     func selectCategory(_ category: Category?) {
         selectedCategoryID = category?.id
+        persistSelectedCategoryID(selectedCategoryID)
         selectedImageID = category?.images.first?.id
     }
 
@@ -187,6 +193,16 @@ final class LibraryStore: ObservableObject {
         }
 
         return merged
+    }
+
+    private func persistSelectedCategoryID(_ categoryID: Category.ID?) {
+        selectedCategoryID = categoryID
+
+        if let categoryID {
+            userDefaults.set(categoryID, forKey: Self.selectedCategoryDefaultsKey)
+        } else {
+            userDefaults.removeObject(forKey: Self.selectedCategoryDefaultsKey)
+        }
     }
 
     private func discoverCategoryFolders() throws -> [URL] {
