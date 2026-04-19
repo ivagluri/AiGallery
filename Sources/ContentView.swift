@@ -273,8 +273,13 @@ struct ContentView: View {
         } label: {
             HStack {
                 if let systemImage {
-                    Label(title, systemImage: systemImage)
-                        .lineLimit(2)
+                    HStack(spacing: 6) {
+                        Image(systemName: systemImage)
+                            .foregroundStyle(systemImage == "star.fill" ? favoriteStarColor : Color.primary)
+
+                        Text(title)
+                            .lineLimit(2)
+                    }
                 } else {
                     Text(title)
                         .lineLimit(2)
@@ -351,8 +356,12 @@ struct ContentView: View {
 
                     if let metadata, metadata.hasVisibleContent {
                         let additionalMetadataEntries = metadata.textEntries.filter { entry in
-                            let keyword = entry.keyword.lowercased()
-                            return keyword != "parameters"
+                            shouldDisplayMetadataEntry(
+                                entry,
+                                hasStructuredMetadata: metadata.prompt != nil
+                                    || metadata.negativePrompt != nil
+                                    || !metadata.generationParameters.isEmpty
+                            )
                         }
 
                         InspectorSection("Metadata", isExpanded: $isPNGInfoExpanded) {
@@ -601,7 +610,7 @@ struct ContentView: View {
         } label: {
             Image(systemName: isFavorite ? "star.fill" : "star")
                 .font(.title3.weight(.semibold))
-                .foregroundStyle(isFavorite ? Color.yellow : Color.white)
+                .foregroundStyle(isFavorite ? favoriteStarColor : Color.white)
                 .padding(10)
                 .background(.black.opacity(0.4), in: Circle())
         }
@@ -668,6 +677,45 @@ struct ContentView: View {
             .split(separator: " ")
             .map { $0.lowercased().capitalized }
             .joined(separator: " ")
+    }
+
+    private func shouldDisplayMetadataEntry(_ entry: PNGTextEntry, hasStructuredMetadata: Bool) -> Bool {
+        let keyword = entry.keyword.lowercased()
+        guard keyword != "parameters" else {
+            return false
+        }
+
+        if hasStructuredMetadata && isRawMetadataBlob(entry.value) {
+            return false
+        }
+
+        return true
+    }
+
+    private func isRawMetadataBlob(_ value: String) -> Bool {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count > 240 else {
+            return false
+        }
+
+        let looksLikeXML = trimmed.hasPrefix("<") && (
+            trimmed.contains("</")
+                || trimmed.localizedCaseInsensitiveContains("<x:xmpmeta")
+                || trimmed.localizedCaseInsensitiveContains("<?xml")
+        )
+
+        let looksLikeJSON = (trimmed.hasPrefix("{") && trimmed.hasSuffix("}"))
+            || (trimmed.hasPrefix("[") && trimmed.hasSuffix("]"))
+
+        return looksLikeXML || looksLikeJSON
+    }
+
+    private var favoriteStarColor: Color {
+        Color(
+            red: 255.0 / 255.0,
+            green: 218.0 / 255.0,
+            blue: 107.0 / 255.0
+        )
     }
 
     private var sidebarPaneBackground: Color {
@@ -1193,7 +1241,7 @@ private struct ThumbnailCell: View {
                 Button(action: onToggleFavorite) {
                     Image(systemName: isFavorite ? "star.fill" : "star")
                         .font(.headline)
-                        .foregroundStyle(isFavorite ? Color.yellow : Color.white)
+                        .foregroundStyle(isFavorite ? favoriteStarColor : Color.white)
                         .padding(8)
                         .background(.black.opacity(0.35), in: Circle())
                 }
@@ -1242,6 +1290,14 @@ private struct ThumbnailCell: View {
         return colorScheme == .dark
             ? Color.clear
             : Color.black.opacity(0.08)
+    }
+
+    private var favoriteStarColor: Color {
+        Color(
+            red: 255.0 / 255.0,
+            green: 218.0 / 255.0,
+            blue: 107.0 / 255.0
+        )
     }
 }
 

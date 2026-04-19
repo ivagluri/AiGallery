@@ -19,6 +19,7 @@ final class LibraryStore: ObservableObject {
     private static let selectedCategoryDefaultsKey = "selectedCategoryID"
     private static let favoriteImageIDsDefaultsKey = "favoriteImageIDsByRoot"
     private static let legacyFavoriteImageIDsDefaultsKey = "favoriteImageIDs"
+    private static let rootCategoryID = "__root__"
     private static let favoritesCategoryID = "__favorites__"
     private static let favoritesGroupID = "__favorites__"
 
@@ -365,15 +366,19 @@ final class LibraryStore: ObservableObject {
     }
 
     private func discoverCategoryFolders() throws -> [URL] {
+        var categoryFolders: [URL] = []
+
+        if !(try loadImages(in: rootURL)).isEmpty {
+            categoryFolders.append(rootURL)
+        }
+
         guard let enumerator = fileManager.enumerator(
             at: rootURL,
             includingPropertiesForKeys: [.isDirectoryKey, .isRegularFileKey],
             options: [.skipsHiddenFiles]
         ) else {
-            return []
+            return categoryFolders
         }
-
-        var categoryFolders: [URL] = []
 
         for case let url as URL in enumerator {
             guard Self.isDirectory(url) else { continue }
@@ -441,6 +446,10 @@ final class LibraryStore: ObservableObject {
     }
 
     private static func categoryID(for folderURL: URL, relativeTo rootURL: URL) -> String {
+        if folderURL.standardizedFileURL == rootURL.standardizedFileURL {
+            return rootCategoryID
+        }
+
         let rootComponents = rootURL.standardizedFileURL.pathComponents
         let folderComponents = folderURL.standardizedFileURL.pathComponents
         let relativeComponents = folderComponents.dropFirst(rootComponents.count)
@@ -448,6 +457,11 @@ final class LibraryStore: ObservableObject {
     }
 
     private static func categoryPathParts(for folderURL: URL, relativeTo rootURL: URL) -> [String] {
+        if folderURL.standardizedFileURL == rootURL.standardizedFileURL {
+            let rootName = rootURL.lastPathComponent.trimmingCharacters(in: .whitespacesAndNewlines)
+            return [rootName.isEmpty ? "Library" : rootName]
+        }
+
         let relativePath = categoryID(for: folderURL, relativeTo: rootURL)
         let components = relativePath
             .split(separator: "/")

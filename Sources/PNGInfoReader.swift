@@ -25,11 +25,12 @@ enum PNGInfoReader {
         }
         let parsedParameters = parameterEntry.map { parseAutomatic1111Parameters($0.value) }
         let parsedComfyUI = parseComfyUIPrompt(from: textEntries)
+        let parsedDrawThings = parseDrawThingsXMP(from: textEntries)
 
-        let prompt = parsedParameters?.prompt ?? parsedComfyUI?.prompt
-        let negativePrompt = parsedParameters?.negativePrompt ?? parsedComfyUI?.negativePrompt
-        let generationParameters = parsedParameters?.parameters ?? parsedComfyUI?.parameters ?? []
-        let hiddenKeywords = parsedComfyUI?.consumedKeywords ?? []
+        let prompt = parsedParameters?.prompt ?? parsedComfyUI?.prompt ?? parsedDrawThings?.prompt
+        let negativePrompt = parsedParameters?.negativePrompt ?? parsedComfyUI?.negativePrompt ?? parsedDrawThings?.negativePrompt
+        let generationParameters = parsedParameters?.parameters ?? parsedComfyUI?.parameters ?? parsedDrawThings?.parameters ?? []
+        let hiddenKeywords = (parsedComfyUI?.consumedKeywords ?? []).union(parsedDrawThings?.consumedKeywords ?? [])
 
         return PNGInfo(
             prompt: prompt,
@@ -298,6 +299,38 @@ enum PNGInfoReader {
         return (positivePrompt, negativePrompt, dedupedParameters, consumedKeywords)
     }
 
+    private static func parseDrawThingsXMP(from textEntries: [PNGTextEntry]) -> (prompt: String?, negativePrompt: String?, parameters: [PNGTextEntry], consumedKeywords: Set<String>)? {
+        guard
+            let xmpEntry = textEntries.first(where: isLikelyXMPEntry),
+            xmpEntry.value.localizedCaseInsensitiveContains("Draw Things")
+        else {
+            return nil
+        }
+
+        let userCommentJSON = firstTagValue(named: "exif:UserComment", in: xmpEntry.value)
+        let altText = firstTagValue(named: "rdf:li", in: xmpEntry.value)
+
+        let parsedJSON = userCommentJSON.flatMap(parseDrawThingsJSON)
+        let parsedAltText = altText.flatMap(parseAutomatic1111Parameters)
+
+        let prompt = parsedJSON?.prompt ?? parsedAltText?.prompt
+        let negativePrompt = parsedJSON?.negativePrompt ?? parsedAltText?.negativePrompt
+        let parameters = deduplicateEntries(
+            (parsedJSON?.parameters ?? []) + (parsedAltText?.parameters ?? [])
+        )
+
+        guard prompt != nil || negativePrompt != nil || !parameters.isEmpty else {
+            return nil
+        }
+
+        return (
+            prompt,
+            negativePrompt,
+            parameters,
+            [xmpEntry.keyword.lowercased()]
+        )
+    }
+
     private static func parseParameterEntries(from value: String?) -> [PNGTextEntry] {
         guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty else {
             return []
@@ -401,6 +434,94 @@ enum PNGInfoReader {
         }
 
         return cleaned
+    }
+
+    private static func isLikelyXMPEntry(_ entry: PNGTextEntry) -> Bool {
+        let keyword = entry.keyword.lowercased()
+        return keyword.contains("xmp") || entry.value.contains("<x:xmpmeta")
+    }
+
+    private static func firstTagValue(named tagName: String, in text: String) -> String? {
+        let pattern = "<\(NSRegularExpression.escapedPattern(for: tagName))\\b[^>]*>(.*?)</\(NSRegularExpression.escapedPattern(for: tagName))>"
+
+        guard
+            let regex = try? NSRegularExpression(pattern: pattern, options: [.dotMatchesLineSeparators, .caseInsensitive]),
+            let match = regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)),
+            let valueRange = Range(match.range(at: 1), in: text)
+        else {
+            return nil
+        }
+
+        return decodeXML(text[valueRange]).nilIfEmpty
+    }
+
+    private static func decodeXML<S: StringProtocol>(_ value: S) -> String {
+        String(value)
+            .replacingOccurrences(of: "&quot;", with: "\"")
+            .replacingOccurrences(of: "&apos;", with: "'")
+            .replacingOccurrences(of: "&lt;", with: "<")
+            .replacingOccurrences(of: "&gt;", with: ">")
+            .replacingOccurrences(of: "&amp;", with: "&")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func parseDrawThingsJSON(_ value: String) -> (prompt: String?, negativePrompt: String?, parameters: [PNGTextEntry])? {
+        guard
+            let data = value.data(using: .utf8),
+            let object = try? JSONSerialization.jsonObject(with: data),
+            let dictionary = object as? [String: Any]
+        else {
+            return nil
+        }
+
+        let prompt = stringValue(forKeys: ["c", "prompt"], in: dictionary)?.nilIfEmpty
+        let negativePrompt = stringValue(forKeys: ["uc", "negative_prompt", "negativePrompt"], in: dictionary)?.nilIfEmpty
+
+        var parameters: [PNGTextEntry] = []
+
+        appendParameter(named: "Model", fromKeys: ["model"], in: dictionary, into: &parameters)
+        appendParameter(named: "Seed", fromKeys: ["seed"], in: dictionary, into: &parameters)
+        appendParameter(named: "Steps", fromKeys: ["steps"], in: dictionary, into: &parameters)
+        appendParameter(named: "Sampler", fromKeys: ["sampler"], in: dictionary, into: &parameters)
+        appendParameter(named: "Guidance Scale", fromKeys: ["guidanceScale"], in: dictionary, into: &parameters)
+        appendParameter(named: "Strength", fromKeys: ["strength"], in: dictionary, into: &parameters)
+        appendParameter(named: "Clip Skip", fromKeys: ["clip_skip", "clipSkip"], in: dictionary, into: &parameters)
+        appendParameter(named: "Aesthetic Score", fromKeys: ["aesthetic_score", "aestheticScore"], in: dictionary, into: &parameters)
+        appendParameter(named: "Negative Aesthetic Score", fromKeys: ["negative_aesthetic_score", "negativeAestheticScore"], in: dictionary, into: &parameters)
+        appendParameter(named: "Original Size", fromKeys: ["original_size", "originalSize"], in: dictionary, into: &parameters)
+        appendParameter(named: "Target Size", fromKeys: ["target_size", "targetSize"], in: dictionary, into: &parameters)
+
+        if let width = stringValue(forKeys: ["width"], in: dictionary)?.nilIfEmpty,
+           let height = stringValue(forKeys: ["height"], in: dictionary)?.nilIfEmpty {
+            parameters.append(PNGTextEntry(keyword: "Size", value: "\(width) x \(height)"))
+        }
+
+        return (
+            prompt,
+            negativePrompt,
+            deduplicateEntries(parameters)
+        )
+    }
+
+    private static func appendParameter(
+        named label: String,
+        fromKeys keys: [String],
+        in dictionary: [String: Any],
+        into parameters: inout [PNGTextEntry]
+    ) {
+        if let value = stringValue(forKeys: keys, in: dictionary)?.nilIfEmpty {
+            parameters.append(PNGTextEntry(keyword: label, value: humanizeParameterValue(value)))
+        }
+    }
+
+    private static func stringValue(forKeys keys: [String], in dictionary: [String: Any]) -> String? {
+        for key in keys {
+            if let value = stringify(dictionary[key]) {
+                return value
+            }
+        }
+
+        return nil
     }
 
     private static func preferredSamplerNode(in nodes: [String: [String: Any]]) -> [String: Any]? {
