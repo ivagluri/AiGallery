@@ -44,24 +44,19 @@ final class LibraryStore: ObservableObject {
 
     func reload() {
         do {
-            let categoryFolders = try fileManager.contentsOfDirectory(
-                at: rootURL,
-                includingPropertiesForKeys: [.isDirectoryKey],
-                options: [.skipsHiddenFiles]
-            )
-            .filter(Self.isDirectory)
-            .sorted { $0.lastPathComponent.localizedCaseInsensitiveCompare($1.lastPathComponent) == .orderedAscending }
+            let categoryFolders = try discoverCategoryFolders()
 
             let loadedCategories = try categoryFolders.map { folderURL in
                 let images = try self.loadImages(in: folderURL)
-                let slug = folderURL.lastPathComponent
+                let categoryID = Self.categoryID(for: folderURL, relativeTo: rootURL)
+                let pathParts = Self.categoryPathParts(for: folderURL, relativeTo: rootURL)
 
                 return Category(
-                    id: slug,
-                    name: Self.humanize(slug),
-                    shortName: Self.subcategoryName(for: slug),
-                    rootGroupID: Self.rootGroupID(for: slug),
-                    rootGroupName: Self.rootGroupName(for: slug),
+                    id: categoryID,
+                    name: Self.categoryName(for: pathParts),
+                    shortName: Self.subcategoryName(for: pathParts),
+                    rootGroupID: Self.rootGroupID(for: pathParts),
+                    rootGroupName: Self.rootGroupName(for: pathParts),
                     folderURL: folderURL,
                     images: images
                 )
@@ -106,7 +101,7 @@ final class LibraryStore: ObservableObject {
         panel.canChooseFiles = false
         panel.allowsMultipleSelection = false
         panel.prompt = "Open"
-        panel.message = "Choose the folder that contains your category folders."
+        panel.message = "Choose the folder that contains your image folders or nested category folders."
 
         if panel.runModal() == .OK, let url = panel.url {
             rootURL = url
@@ -135,6 +130,32 @@ final class LibraryStore: ObservableObject {
         }
     }
 
+    private func discoverCategoryFolders() throws -> [URL] {
+        guard let enumerator = fileManager.enumerator(
+            at: rootURL,
+            includingPropertiesForKeys: [.isDirectoryKey, .isRegularFileKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            return []
+        }
+
+        var categoryFolders: [URL] = []
+
+        for case let url as URL in enumerator {
+            guard Self.isDirectory(url) else { continue }
+
+            let images = try loadImages(in: url)
+            if !images.isEmpty {
+                categoryFolders.append(url)
+            }
+        }
+
+        return categoryFolders.sorted {
+            Self.categorySortKey(for: $0, relativeTo: rootURL)
+                .localizedCaseInsensitiveCompare(Self.categorySortKey(for: $1, relativeTo: rootURL)) == .orderedAscending
+        }
+    }
+
     private static func isDirectory(_ url: URL) -> Bool {
         (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
     }
@@ -155,17 +176,43 @@ final class LibraryStore: ObservableObject {
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private static func rootGroupID(for slug: String) -> String {
-        let parts = folderNameParts(for: slug)
-        return parts.first ?? slug
+    private static func categoryID(for folderURL: URL, relativeTo rootURL: URL) -> String {
+        let rootComponents = rootURL.standardizedFileURL.pathComponents
+        let folderComponents = folderURL.standardizedFileURL.pathComponents
+        let relativeComponents = folderComponents.dropFirst(rootComponents.count)
+        return relativeComponents.joined(separator: "/")
     }
 
-    private static func rootGroupName(for slug: String) -> String {
-        return humanize(rootGroupID(for: slug))
+    private static func categoryPathParts(for folderURL: URL, relativeTo rootURL: URL) -> [String] {
+        let relativePath = categoryID(for: folderURL, relativeTo: rootURL)
+        let components = relativePath
+            .split(separator: "/")
+            .map(String.init)
+            .filter { !$0.isEmpty }
+
+        if components.count <= 1, let first = components.first {
+            return folderNameParts(for: first)
+        }
+
+        return components
     }
 
-    private static func subcategoryName(for slug: String) -> String {
-        let parts = folderNameParts(for: slug)
+    private static func categoryName(for pathParts: [String]) -> String {
+        pathParts
+            .map(humanize)
+            .joined(separator: " / ")
+    }
+
+    private static func rootGroupID(for pathParts: [String]) -> String {
+        pathParts.first ?? ""
+    }
+
+    private static func rootGroupName(for pathParts: [String]) -> String {
+        humanize(rootGroupID(for: pathParts))
+    }
+
+    private static func subcategoryName(for pathParts: [String]) -> String {
+        let parts = pathParts
         if parts.count <= 1 {
             return "Overview"
         }
@@ -187,6 +234,12 @@ final class LibraryStore: ObservableObject {
         }
 
         return [slug]
+    }
+
+    private static func categorySortKey(for folderURL: URL, relativeTo rootURL: URL) -> String {
+        categoryPathParts(for: folderURL, relativeTo: rootURL)
+            .map { $0.lowercased() }
+            .joined(separator: "/")
     }
 
     private static func validCategoryID(current: String?, categories: [Category]) -> String? {

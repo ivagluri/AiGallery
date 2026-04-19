@@ -90,6 +90,7 @@ struct ContentView: View {
                 PlaceholderView(title: "No Categories", systemImage: "folder")
             }
         }
+        .navigationSplitViewColumnWidth(min: 220, ideal: 280, max: 360)
     }
 
     private var thumbnailGrid: some View {
@@ -122,6 +123,7 @@ struct ContentView: View {
                 PlaceholderView(title: "Choose a Category", systemImage: "photo.on.rectangle")
             }
         }
+        .navigationSplitViewColumnWidth(min: 420, ideal: 760)
     }
 
     private var inspector: some View {
@@ -177,6 +179,7 @@ struct ContentView: View {
                 PlaceholderView(title: "Choose an Image", systemImage: "sidebar.right")
             }
         }
+        .navigationSplitViewColumnWidth(min: 280, ideal: 380, max: 520)
     }
 
     private func inspectorRow(_ label: String, _ value: String) -> some View {

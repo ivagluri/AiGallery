@@ -10,6 +10,7 @@ struct AiGalleryApp: App {
                 .environmentObject(library)
                 .frame(minWidth: 1100, minHeight: 700)
         }
+        .defaultSize(width: 1500, height: 920)
         .windowStyle(.titleBar)
         .commands {
             CommandGroup(after: .newItem) {
