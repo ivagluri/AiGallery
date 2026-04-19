@@ -202,8 +202,13 @@ final class LibraryStore: ObservableObject {
         let normalizedQuery = trimmedQuery.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
         let safeLimit = max(limit, 1)
 
-        var matches: [ImageItem] = []
-        matches.reserveCapacity(min(safeLimit, 64))
+        var exactMatches: [ImageItem] = []
+        var prefixMatches: [ImageItem] = []
+        var containsMatches: [ImageItem] = []
+
+        exactMatches.reserveCapacity(min(safeLimit, 8))
+        prefixMatches.reserveCapacity(min(safeLimit, 32))
+        containsMatches.reserveCapacity(min(safeLimit, 64))
 
         var totalMatches = 0
 
@@ -214,12 +219,24 @@ final class LibraryStore: ObservableObject {
             }
 
             totalMatches += 1
-            if matches.count < safeLimit {
-                matches.append(image)
+            let currentVisibleCount = exactMatches.count + prefixMatches.count + containsMatches.count
+            guard currentVisibleCount < safeLimit else {
+                continue
+            }
+
+            if normalizedTag == normalizedQuery {
+                exactMatches.append(image)
+            } else if normalizedTag.hasPrefix(normalizedQuery) {
+                prefixMatches.append(image)
+            } else {
+                containsMatches.append(image)
             }
         }
 
-        return TagSearchResult(images: matches, totalMatches: totalMatches)
+        return TagSearchResult(
+            images: exactMatches + prefixMatches + containsMatches,
+            totalMatches: totalMatches
+        )
     }
 
     private func loadImages(in folderURL: URL) throws -> [ImageItem] {
