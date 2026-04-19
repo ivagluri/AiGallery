@@ -13,6 +13,7 @@ final class LibraryStore: ObservableObject {
     private var pngInfoCache: [String: PNGInfo?] = [:]
     private var folderMetadataCache: [String: FolderMetadata?] = [:]
     private var sourceCategories: [Category] = []
+    private var searchIndex: [ImageItem] = []
     private var favoriteImageIDs: Set<String>
     private static let selectedCategoryDefaultsKey = "selectedCategoryID"
     private static let favoriteImageIDsDefaultsKey = "favoriteImageIDs"
@@ -70,6 +71,10 @@ final class LibraryStore: ObservableObject {
         return category.images.first { $0.id == selectedImageID } ?? category.images.first
     }
 
+    var allImages: [ImageItem] {
+        sourceCategories.flatMap(\.images)
+    }
+
     func reload() {
         do {
             let categoryFolders = try discoverCategoryFolders()
@@ -93,6 +98,7 @@ final class LibraryStore: ObservableObject {
             .filter { !$0.images.isEmpty }
 
             sourceCategories = loadedCategories
+            searchIndex = Self.makeSearchIndex(from: loadedCategories)
             pngInfoCache.removeAll()
             folderMetadataCache.removeAll()
             pruneFavoritesToExistingImages()
@@ -185,6 +191,35 @@ final class LibraryStore: ObservableObject {
             rootURL = url
             reload()
         }
+    }
+
+    func searchTags(matching query: String, limit: Int) -> TagSearchResult {
+        let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedQuery.isEmpty else {
+            return .empty
+        }
+
+        let normalizedQuery = trimmedQuery.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
+        let safeLimit = max(limit, 1)
+
+        var matches: [ImageItem] = []
+        matches.reserveCapacity(min(safeLimit, 64))
+
+        var totalMatches = 0
+
+        for image in searchIndex {
+            let normalizedTag = image.inferredTag.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
+            guard normalizedTag.contains(normalizedQuery) else {
+                continue
+            }
+
+            totalMatches += 1
+            if matches.count < safeLimit {
+                matches.append(image)
+            }
+        }
+
+        return TagSearchResult(images: matches, totalMatches: totalMatches)
     }
 
     private func loadImages(in folderURL: URL) throws -> [ImageItem] {
@@ -311,6 +346,18 @@ final class LibraryStore: ObservableObject {
     private static func isSupportedImage(_ url: URL) -> Bool {
         let supportedExtensions = ["png", "jpg", "jpeg", "webp"]
         return supportedExtensions.contains(url.pathExtension.lowercased())
+    }
+
+    private static func makeSearchIndex(from categories: [Category]) -> [ImageItem] {
+        categories
+            .flatMap(\.images)
+            .sorted { lhs, rhs in
+                let comparison = lhs.inferredTag.localizedCaseInsensitiveCompare(rhs.inferredTag)
+                if comparison == .orderedSame {
+                    return lhs.displayName.localizedCaseInsensitiveCompare(rhs.displayName) == .orderedAscending
+                }
+                return comparison == .orderedAscending
+            }
     }
 
     private static func inferTag(from displayName: String) -> String {

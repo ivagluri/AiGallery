@@ -7,6 +7,10 @@ struct ContentView: View {
     @AppStorage("showInspector") private var showInspector = true
     @AppStorage("imageSortOrder") private var imageSortOrderRawValue = ImageSortOrder.alphabeticalAscending.rawValue
     @AppStorage("thumbnailSizeIndex") private var thumbnailSizeIndex = 2
+    @AppStorage("inspectorPanelWidth") private var inspectorPanelWidth = 360.0
+    @FocusState private var isSearchFieldFocused: Bool
+    @State private var searchText = ""
+    @State private var activeSearchText = ""
     @State private var expandedGroupIDs: Set<String> = []
     @State private var isImageInfoExpanded = true
     @State private var isPNGInfoExpanded = true
@@ -14,12 +18,17 @@ struct ContentView: View {
     @State private var isPNGDetailsExpanded = true
     @State private var copiedInspectorValue: String?
     @State private var copiedInspectorResetTask: DispatchWorkItem?
+    @State private var savedBrowseSelection: BrowseSelection?
+    @State private var searchSelectedImageID: ImageItem.ID?
+    @State private var pendingSearchUpdateTask: DispatchWorkItem?
+    @State private var activeSearchResults: TagSearchResult = .empty
 
     var body: some View {
         NavigationSplitView {
             sidebar
         } detail: {
             contentArea
+                .frame(minWidth: 500, maxWidth: .infinity, maxHeight: .infinity)
         }
         .navigationTitle("AiGallery")
         .toolbar {
@@ -48,6 +57,10 @@ struct ContentView: View {
                 .labelStyle(.iconOnly)
                 .help(showInspector ? "Hide Info" : "Show Info")
             }
+
+            ToolbarItem(placement: .automatic) {
+                toolbarSearchField
+            }
         }
         .onAppear {
             expandAllGroupsIfNeeded()
@@ -55,21 +68,61 @@ struct ContentView: View {
         .onChange(of: library.categoryGroups.map(\.id)) { _ in
             expandAllGroupsIfNeeded()
         }
+        .onChange(of: searchText) { newValue in
+            handleSearchTextChange(newValue)
+        }
     }
 
     private var contentArea: some View {
-        Group {
-            if showInspector {
-                HSplitView {
-                    thumbnailGrid
-                        .frame(minWidth: 320, idealWidth: 820, maxWidth: .infinity)
-                    inspector
-                        .frame(minWidth: 240, idealWidth: 360, maxWidth: .infinity)
+        InspectorSplitView(
+            isInspectorVisible: $showInspector,
+            inspectorWidth: $inspectorPanelWidth,
+            minPrimaryWidth: 320,
+            minInspectorWidth: 240,
+            primary: thumbnailGrid,
+            inspector: inspector
+        )
+    }
+
+    private var toolbarSearchField: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                .foregroundStyle(.secondary)
+
+            TextField("Search Tags", text: $searchText)
+                .textFieldStyle(.plain)
+                .focused($isSearchFieldFocused)
+
+            if !searchText.isEmpty {
+                Button {
+                    searchText = ""
+                    activeSearchText = ""
+                    pendingSearchUpdateTask?.cancel()
+                    isSearchFieldFocused = false
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.secondary)
                 }
-            } else {
-                thumbnailGrid
+                .buttonStyle(.plain)
+                .help("Clear Search")
             }
         }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .frame(width: 220)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Color(nsColor: .controlBackgroundColor))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(
+                    isSearchFieldFocused
+                        ? Color.accentColor.opacity(0.45)
+                        : Color.primary.opacity(0.08),
+                    lineWidth: 1
+                )
+        )
     }
 
     private var sidebar: some View {
@@ -115,11 +168,13 @@ struct ContentView: View {
                 PlaceholderView(title: "No Categories", systemImage: "folder")
             }
         }
+        .disabled(isSearching)
         .navigationSplitViewColumnWidth(min: 180, ideal: 260, max: 420)
     }
 
     private func categoryRow(_ category: Category, title: String, systemImage: String?) -> some View {
         Button {
+            guard !isSearching else { return }
             library.selectCategory(category)
         } label: {
             HStack {
@@ -148,32 +203,24 @@ struct ContentView: View {
 
     private var thumbnailGrid: some View {
         Group {
-            if let category = library.selectedCategory {
+            if isSearching {
+                VStack(spacing: 0) {
+                    gridControls(title: "Search Results", subtitle: searchResultsSummary)
+
+                    if displayImages.isEmpty {
+                        PlaceholderView(
+                            title: "No Matches",
+                            systemImage: "magnifyingglass",
+                            description: searchPlaceholderDescription
+                        )
+                    } else {
+                        imageGrid(images: displayImages)
+                    }
+                }
+            } else if let category = library.selectedCategory {
                 VStack(spacing: 0) {
                     gridControls(for: category)
-
-                    ScrollView {
-                        LazyVGrid(
-                            columns: [GridItem(.adaptive(minimum: thumbnailSize, maximum: thumbnailSize + 40), spacing: 16)],
-                            spacing: 16
-                        ) {
-                            ForEach(sortedImages(for: category)) { image in
-                                ThumbnailCell(
-                                    image: image,
-                                    isSelected: image.id == library.selectedImage?.id,
-                                    thumbnailHeight: thumbnailSize,
-                                    isFavorite: library.isFavorite(image),
-                                    onToggleFavorite: {
-                                        library.toggleFavorite(image)
-                                    }
-                                )
-                                .onTapGesture {
-                                    library.selectImage(image)
-                                }
-                            }
-                        }
-                        .padding(20)
-                    }
+                    imageGrid(images: displayImages)
                 }
             } else if let errorMessage = library.errorMessage {
                 PlaceholderView(
@@ -189,7 +236,7 @@ struct ContentView: View {
 
     private var inspector: some View {
         ScrollView {
-            if let image = library.selectedImage {
+            if let image = displayedSelectedImage {
                 let metadata = library.inspectorMetadata(for: image)
 
                 VStack(alignment: .leading, spacing: 16) {
@@ -324,6 +371,7 @@ struct ContentView: View {
         Binding(
             get: { library.selectedCategory?.id },
             set: { newValue in
+                guard !isSearching else { return }
                 let category = library.categories.first { $0.id == newValue }
                 library.selectCategory(category)
             }
@@ -353,9 +401,13 @@ struct ContentView: View {
     }
 
     private func gridControls(for category: Category) -> some View {
+        gridControls(title: category.name, subtitle: nil)
+    }
+
+    private func gridControls(title: String, subtitle: String?) -> some View {
         ViewThatFits(in: .horizontal) {
             HStack(spacing: 16) {
-                categoryHeader(category)
+                categoryHeader(title: title, subtitle: subtitle)
 
                 Spacer(minLength: 12)
 
@@ -365,7 +417,7 @@ struct ContentView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
 
             VStack(alignment: .leading, spacing: 12) {
-                categoryHeader(category)
+                categoryHeader(title: title, subtitle: subtitle)
 
                 HStack(spacing: 16) {
                     sortButton
@@ -376,7 +428,7 @@ struct ContentView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
 
             VStack(alignment: .leading, spacing: 12) {
-                categoryHeader(category)
+                categoryHeader(title: title, subtitle: subtitle)
 
                 sortButton
 
@@ -413,12 +465,47 @@ struct ContentView: View {
             : Color.black.opacity(0.10)
     }
 
-    private func categoryHeader(_ category: Category) -> some View {
-        Text(category.name)
-            .font(.headline)
-            .lineLimit(1)
-            .truncationMode(.tail)
-            .help(category.name)
+    private func categoryHeader(title: String, subtitle: String?) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title)
+                .font(.headline)
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .help(title)
+
+            if let subtitle {
+                Text(subtitle)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
+        }
+    }
+
+    private func imageGrid(images: [ImageItem]) -> some View {
+        ScrollView {
+            LazyVGrid(
+                columns: [GridItem(.adaptive(minimum: thumbnailSize, maximum: thumbnailSize + 40), spacing: 16)],
+                spacing: 16
+            ) {
+                ForEach(images) { image in
+                    ThumbnailCell(
+                        image: image,
+                        isSelected: image.id == displayedSelectedImage?.id,
+                        thumbnailHeight: thumbnailSize,
+                        isFavorite: library.isFavorite(image),
+                        onToggleFavorite: {
+                            library.toggleFavorite(image)
+                        }
+                    )
+                    .onTapGesture {
+                        selectImage(image)
+                    }
+                }
+            }
+            .padding(20)
+        }
     }
 
     private func previewFavoriteButton(for image: ImageItem) -> some View {
@@ -468,7 +555,11 @@ struct ContentView: View {
     }
 
     private func sortedImages(for category: Category) -> [ImageItem] {
-        category.images.sorted { lhs, rhs in
+        sortedImages(category.images)
+    }
+
+    private func sortedImages(_ images: [ImageItem]) -> [ImageItem] {
+        images.sorted { lhs, rhs in
             let comparison = lhs.inferredTag.localizedCaseInsensitiveCompare(rhs.inferredTag)
 
             switch imageSortOrder {
@@ -500,7 +591,299 @@ struct ContentView: View {
         }
     }
 
+    private var trimmedSearchText: String {
+        searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var trimmedActiveSearchText: String {
+        activeSearchText.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var isSearching: Bool {
+        !trimmedActiveSearchText.isEmpty
+    }
+
+    private var displayImages: [ImageItem] {
+        if isSearching {
+            return activeSearchResults.images
+        }
+
+        guard let category = library.selectedCategory else {
+            return []
+        }
+
+        return sortedImages(for: category)
+    }
+
+    private var displayedSelectedImage: ImageItem? {
+        if isSearching {
+            return displayImages.first { $0.id == searchSelectedImageID } ?? displayImages.first
+        }
+
+        return library.selectedImage
+    }
+
+    private var searchResultsSummary: String {
+        let resultCount = activeSearchResults.totalMatches
+        let visibleCount = activeSearchResults.images.count
+        let matchLabel = resultCount == 1 ? "match" : "matches"
+
+        if resultCount > visibleCount {
+            return "Showing first \(visibleCount) of \(resultCount) \(matchLabel) for \"\(trimmedActiveSearchText)\""
+        }
+
+        return "\(resultCount) \(matchLabel) for \"\(trimmedActiveSearchText)\""
+    }
+
+    private var searchPlaceholderDescription: String {
+        if trimmedSearchText.count < Self.minimumSearchLength {
+            let characterLabel = Self.minimumSearchLength == 1 ? "character" : "characters"
+            return "Type at least \(Self.minimumSearchLength) \(characterLabel) to search tags."
+        }
+
+        return "No tags matched \"\(trimmedActiveSearchText)\"."
+    }
+
+    private func handleSearchTextChange(_ newValue: String) {
+        let trimmedValue = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        let wasSearching = !trimmedActiveSearchText.isEmpty
+        let isActivatingSearch = !trimmedValue.isEmpty && !wasSearching && savedBrowseSelection == nil
+        let isClearingSearch = trimmedValue.isEmpty && (wasSearching || savedBrowseSelection != nil)
+
+        if isActivatingSearch {
+            savedBrowseSelection = BrowseSelection(
+                categoryID: library.selectedCategory?.id,
+                imageID: library.selectedImage?.id
+            )
+        }
+
+        pendingSearchUpdateTask?.cancel()
+
+        if isClearingSearch {
+            activeSearchText = ""
+            activeSearchResults = .empty
+            restoreBrowseSelection()
+            return
+        }
+
+        guard !trimmedValue.isEmpty else {
+            return
+        }
+
+        guard trimmedValue.count >= Self.minimumSearchLength else {
+            activeSearchText = ""
+            activeSearchResults = .empty
+            searchSelectedImageID = nil
+            return
+        }
+
+        let updateTask = DispatchWorkItem {
+            activeSearchText = trimmedValue
+            activeSearchResults = library.searchTags(
+                matching: trimmedValue,
+                limit: Self.maximumSearchResults
+            )
+
+            if let searchSelectedImageID, activeSearchResults.images.contains(where: { $0.id == searchSelectedImageID }) {
+                return
+            }
+
+            searchSelectedImageID = activeSearchResults.images.first?.id
+        }
+
+        pendingSearchUpdateTask = updateTask
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.18, execute: updateTask)
+    }
+
+    private func restoreBrowseSelection() {
+        if let categoryID = savedBrowseSelection?.categoryID {
+            let category = library.categories.first { $0.id == categoryID }
+            library.selectCategory(category)
+
+            if let imageID = savedBrowseSelection?.imageID,
+               let image = category?.images.first(where: { $0.id == imageID }) {
+                library.selectImage(image)
+            }
+        }
+
+        savedBrowseSelection = nil
+        searchSelectedImageID = nil
+        pendingSearchUpdateTask?.cancel()
+        activeSearchResults = .empty
+    }
+
+    private func selectImage(_ image: ImageItem) {
+        if isSearching {
+            searchSelectedImageID = image.id
+        } else {
+            library.selectImage(image)
+        }
+    }
+
+    private static let maximumSearchResults = 300
+    private static let minimumSearchLength = 2
     private static let thumbnailSizes: [Double] = [100, 120, 150, 185, 225, 260, 300]
+}
+
+private struct BrowseSelection {
+    let categoryID: Category.ID?
+    let imageID: ImageItem.ID?
+}
+
+private struct InspectorSplitView<Primary: View, Inspector: View>: NSViewControllerRepresentable {
+    @Binding var isInspectorVisible: Bool
+    @Binding var inspectorWidth: Double
+    let minPrimaryWidth: CGFloat
+    let minInspectorWidth: CGFloat
+    let primary: Primary
+    let inspector: Inspector
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(
+            isInspectorVisible: $isInspectorVisible,
+            inspectorWidth: $inspectorWidth
+        )
+    }
+
+    func makeNSViewController(context: Context) -> SplitViewController {
+        let controller = SplitViewController(
+            coordinator: context.coordinator,
+            minPrimaryWidth: minPrimaryWidth,
+            minInspectorWidth: minInspectorWidth
+        )
+        controller.update(primary: primary, inspector: inspector)
+        controller.setInspectorVisible(isInspectorVisible, animated: false)
+        controller.restoreInspectorWidth(CGFloat(inspectorWidth))
+        return controller
+    }
+
+    func updateNSViewController(_ controller: SplitViewController, context: Context) {
+        controller.update(primary: primary, inspector: inspector)
+        controller.setInspectorVisible(isInspectorVisible, animated: false)
+        controller.restoreInspectorWidth(CGFloat(inspectorWidth))
+    }
+
+    final class Coordinator: NSObject {
+        @Binding var isInspectorVisible: Bool
+        @Binding var inspectorWidth: Double
+        weak var controller: SplitViewController?
+
+        init(
+            isInspectorVisible: Binding<Bool>,
+            inspectorWidth: Binding<Double>
+        ) {
+            self._isInspectorVisible = isInspectorVisible
+            self._inspectorWidth = inspectorWidth
+        }
+    }
+
+    final class SplitViewController: NSSplitViewController {
+        let primaryHostingController = NSHostingController(rootView: AnyView(EmptyView()))
+        let inspectorHostingController = NSHostingController(rootView: AnyView(EmptyView()))
+        let primaryItem: NSSplitViewItem
+        let inspectorItem: NSSplitViewItem
+
+        private let coordinator: Coordinator
+        private let minPrimaryWidth: CGFloat
+        private let minInspectorWidth: CGFloat
+        private var hasAppliedInitialWidth = false
+        private var pendingInspectorWidth: CGFloat?
+
+        init(coordinator: Coordinator, minPrimaryWidth: CGFloat, minInspectorWidth: CGFloat) {
+            self.coordinator = coordinator
+            self.minPrimaryWidth = minPrimaryWidth
+            self.minInspectorWidth = minInspectorWidth
+            self.primaryItem = NSSplitViewItem(viewController: primaryHostingController)
+            self.inspectorItem = NSSplitViewItem(viewController: inspectorHostingController)
+            super.init(nibName: nil, bundle: nil)
+
+            coordinator.controller = self
+
+            primaryItem.minimumThickness = minPrimaryWidth
+            inspectorItem.minimumThickness = minInspectorWidth
+            inspectorItem.canCollapse = true
+
+            addSplitViewItem(primaryItem)
+            addSplitViewItem(inspectorItem)
+
+            splitView.delegate = self
+        }
+
+        @available(*, unavailable)
+        required init?(coder: NSCoder) {
+            fatalError("init(coder:) has not been implemented")
+        }
+
+        override func viewDidLayout() {
+            super.viewDidLayout()
+
+            if !hasAppliedInitialWidth || pendingInspectorWidth != nil {
+                restoreInspectorWidth(pendingInspectorWidth)
+                pendingInspectorWidth = nil
+                hasAppliedInitialWidth = true
+            }
+        }
+
+        func update<PrimaryContent: View, InspectorContent: View>(
+            primary: PrimaryContent,
+            inspector: InspectorContent
+        ) {
+            primaryHostingController.rootView = AnyView(primary)
+            inspectorHostingController.rootView = AnyView(inspector)
+        }
+
+        func setInspectorVisible(_ isVisible: Bool, animated: Bool) {
+            guard inspectorItem.isCollapsed != !isVisible else { return }
+
+            if isVisible, animated {
+                inspectorItem.animator().isCollapsed = false
+            } else if animated {
+                inspectorItem.animator().isCollapsed = true
+            } else if isVisible {
+                inspectorItem.isCollapsed = false
+            } else {
+                inspectorItem.isCollapsed = true
+            }
+        }
+
+        func restoreInspectorWidth(_ width: CGFloat?) {
+            guard let width else { return }
+
+            guard
+                isViewLoaded,
+                view.bounds.width > 0,
+                !inspectorItem.isCollapsed
+            else {
+                pendingInspectorWidth = width
+                return
+            }
+
+            let totalWidth = splitView.bounds.width
+            let dividerThickness = splitView.dividerThickness
+            let clampedInspectorWidth = max(
+                minInspectorWidth,
+                min(width, totalWidth - minPrimaryWidth - dividerThickness)
+            )
+            let dividerPosition = totalWidth - clampedInspectorWidth - dividerThickness
+
+            splitView.setPosition(dividerPosition, ofDividerAt: 0)
+        }
+
+        override func splitViewDidResizeSubviews(_ notification: Notification) {
+            guard
+                coordinator.isInspectorVisible,
+                !inspectorItem.isCollapsed,
+                inspectorHostingController.isViewLoaded
+            else {
+                return
+            }
+
+            let width = max(inspectorHostingController.view.frame.width, minInspectorWidth)
+            if abs(coordinator.inspectorWidth - width) > 0.5 {
+                coordinator.inspectorWidth = width
+            }
+        }
+    }
 }
 
 private struct ThumbnailCell: View {

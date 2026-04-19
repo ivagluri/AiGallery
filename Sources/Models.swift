@@ -79,3 +79,10 @@ struct CategoryGroup: Identifiable, Hashable {
         categories.reduce(0) { $0 + $1.images.count }
     }
 }
+
+struct TagSearchResult: Hashable {
+    let images: [ImageItem]
+    let totalMatches: Int
+
+    static let empty = TagSearchResult(images: [], totalMatches: 0)
+}
