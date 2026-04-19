@@ -15,18 +15,21 @@ final class LibraryStore: ObservableObject {
     private var sourceCategories: [Category] = []
     private var searchIndex: [ImageItem] = []
     private var favoriteImageIDs: Set<String>
+    private static let rootURLDefaultsKey = "selectedRootURL"
     private static let selectedCategoryDefaultsKey = "selectedCategoryID"
-    private static let favoriteImageIDsDefaultsKey = "favoriteImageIDs"
+    private static let favoriteImageIDsDefaultsKey = "favoriteImageIDsByRoot"
+    private static let legacyFavoriteImageIDsDefaultsKey = "favoriteImageIDs"
     private static let favoritesCategoryID = "__favorites__"
     private static let favoritesGroupID = "__favorites__"
 
     init(userDefaults: UserDefaults = .standard) {
         self.userDefaults = userDefaults
-        let defaultRootURL = Self.defaultRootURL()
+        let defaultRootURL = Self.persistedRootURL(from: userDefaults) ?? Self.defaultRootURL()
         let fallbackRootURL = FileManager.default.homeDirectoryForCurrentUser
         self.rootURL = defaultRootURL ?? fallbackRootURL
         self.selectedCategoryID = userDefaults.string(forKey: Self.selectedCategoryDefaultsKey)
-        self.favoriteImageIDs = Set(userDefaults.stringArray(forKey: Self.favoriteImageIDsDefaultsKey) ?? [])
+        self.favoriteImageIDs = []
+        self.favoriteImageIDs = loadFavoriteImageIDs(for: self.rootURL)
 
         if defaultRootURL != nil {
             reload()
@@ -189,6 +192,8 @@ final class LibraryStore: ObservableObject {
 
         if panel.runModal() == .OK, let url = panel.url {
             rootURL = url
+            persistRootURL(url)
+            favoriteImageIDs = loadFavoriteImageIDs(for: url)
             reload()
         }
     }
@@ -326,8 +331,34 @@ final class LibraryStore: ObservableObject {
         }
     }
 
+    private func persistRootURL(_ rootURL: URL) {
+        userDefaults.set(rootURL.standardizedFileURL.path, forKey: Self.rootURLDefaultsKey)
+    }
+
     private func persistFavoriteImageIDs() {
-        userDefaults.set(Array(favoriteImageIDs).sorted(), forKey: Self.favoriteImageIDsDefaultsKey)
+        var favoritesByRoot = userDefaults.dictionary(forKey: Self.favoriteImageIDsDefaultsKey) as? [String: [String]] ?? [:]
+        favoritesByRoot[Self.favoriteImageIDsStorageKey(for: rootURL)] = Array(favoriteImageIDs).sorted()
+        userDefaults.set(favoritesByRoot, forKey: Self.favoriteImageIDsDefaultsKey)
+    }
+
+    private func loadFavoriteImageIDs(for rootURL: URL) -> Set<String> {
+        let storageKey = Self.favoriteImageIDsStorageKey(for: rootURL)
+        let favoritesByRoot = userDefaults.dictionary(forKey: Self.favoriteImageIDsDefaultsKey) as? [String: [String]] ?? [:]
+
+        if let favoriteImageIDs = favoritesByRoot[storageKey] {
+            return Set(favoriteImageIDs)
+        }
+
+        let legacyFavoriteImageIDs = Set(userDefaults.stringArray(forKey: Self.legacyFavoriteImageIDsDefaultsKey) ?? [])
+        guard !legacyFavoriteImageIDs.isEmpty else {
+            return []
+        }
+
+        var migratedFavoritesByRoot = favoritesByRoot
+        migratedFavoritesByRoot[storageKey] = Array(legacyFavoriteImageIDs).sorted()
+        userDefaults.set(migratedFavoritesByRoot, forKey: Self.favoriteImageIDsDefaultsKey)
+        userDefaults.removeObject(forKey: Self.legacyFavoriteImageIDsDefaultsKey)
+        return legacyFavoriteImageIDs
     }
 
     private func discoverCategoryFolders() throws -> [URL] {
@@ -380,6 +411,24 @@ final class LibraryStore: ObservableObject {
     private static func inferTag(from displayName: String) -> String {
         let cleaned = displayName.replacingOccurrences(of: "_00001_", with: "")
         return cleaned.replacingOccurrences(of: "_", with: " ")
+    }
+
+    private static func persistedRootURL(from userDefaults: UserDefaults) -> URL? {
+        guard let path = userDefaults.string(forKey: Self.rootURLDefaultsKey) else {
+            return nil
+        }
+
+        let url = URL(fileURLWithPath: path, isDirectory: true).standardizedFileURL
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            userDefaults.removeObject(forKey: Self.rootURLDefaultsKey)
+            return nil
+        }
+
+        return url
+    }
+
+    private static func favoriteImageIDsStorageKey(for rootURL: URL) -> String {
+        rootURL.standardizedFileURL.path
     }
 
     private static func humanize(_ slug: String) -> String {
