@@ -24,6 +24,8 @@ struct ContentView: View {
     @State private var searchSelectedImageID: ImageItem.ID?
     @State private var pendingSearchUpdateTask: DispatchWorkItem?
     @State private var activeSearchResults: TagSearchResult = .empty
+    @StateObject private var previewController = PreviewOverlayController()
+    @State private var hostWindow: NSWindow?
 
     var body: some View {
         NavigationSplitView {
@@ -36,6 +38,7 @@ struct ContentView: View {
         .toolbar {
             ToolbarItemGroup {
                 Button {
+                    relinquishSearchFocus()
                     library.reload()
                 } label: {
                     Label("Reload", systemImage: "arrow.clockwise")
@@ -44,6 +47,7 @@ struct ContentView: View {
                 .help("Reload Library")
 
                 Button {
+                    relinquishSearchFocus()
                     library.chooseRootFolder()
                 } label: {
                     Label("Choose Folder", systemImage: "folder")
@@ -52,6 +56,7 @@ struct ContentView: View {
                 .help("Choose Image Root")
 
                 Button {
+                    relinquishSearchFocus()
                     showInspector.toggle()
                 } label: {
                     Label(showInspector ? "Hide Info" : "Show Info", systemImage: showInspector ? "info.circle.fill" : "info.circle")
@@ -75,6 +80,19 @@ struct ContentView: View {
         }
         .onChange(of: searchText) { newValue in
             handleSearchTextChange(newValue)
+        }
+        .background(
+            HostWindowReader { window in
+                hostWindow = window
+            }
+        )
+        .background(
+            KeyEventMonitor { event in
+                handlePreviewHotkey(event)
+            }
+        )
+        .onDisappear {
+            previewController.dismiss()
         }
     }
 
@@ -271,6 +289,7 @@ struct ContentView: View {
     ) -> some View {
         Button {
             guard !isSearching else { return }
+            relinquishSearchFocus()
             library.selectCategory(category)
         } label: {
             HStack {
@@ -1038,11 +1057,58 @@ struct ContentView: View {
     }
 
     private func selectImage(_ image: ImageItem) {
+        relinquishSearchFocus()
+
         if isSearching {
             searchSelectedImageID = image.id
         } else {
             library.selectImage(image)
         }
+    }
+
+    private func handlePreviewHotkey(_ event: NSEvent) -> NSEvent? {
+        guard
+            event.type == .keyDown,
+            event.window === hostWindow,
+            !previewController.isPresented
+        else {
+            return event
+        }
+
+        guard shouldHandlePreviewHotkey(event) else {
+            return event
+        }
+
+        previewController.toggle(
+            session: PreviewOverlaySession(image: displayedSelectedImage),
+            from: hostWindow
+        )
+        return nil
+    }
+
+    private func shouldHandlePreviewHotkey(_ event: NSEvent) -> Bool {
+        guard
+            event.keyCode == 49,
+            displayedSelectedImage != nil
+        else {
+            return false
+        }
+
+        let disallowedModifiers = event.modifierFlags.intersection([.command, .control, .option])
+        guard disallowedModifiers.isEmpty else {
+            return false
+        }
+
+        return !isSearchFieldFocused && !(hostWindow?.firstResponder is NSTextView)
+    }
+
+    private func relinquishSearchFocus() {
+        guard isSearchFieldFocused || hostWindow?.firstResponder is NSTextView else {
+            return
+        }
+
+        isSearchFieldFocused = false
+        hostWindow?.makeFirstResponder(nil)
     }
 
     private static let maximumSearchResults = 300
