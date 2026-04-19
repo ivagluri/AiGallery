@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+APP_NAME="AiGallery"
+VERSION="${VERSION:-${version:-}}"
+OUTPUT_NAME="$APP_NAME"
+
+if [[ -n "$VERSION" ]]; then
+  OUTPUT_NAME="$APP_NAME-$VERSION"
+fi
+
+"$ROOT_DIR/scripts/build-app.sh"
+
+APP_PATH="$ROOT_DIR/dist/$OUTPUT_NAME.app"
+ZIP_PATH="$ROOT_DIR/dist/$OUTPUT_NAME.zip"
+
+if [[ ! -d "$APP_PATH" ]]; then
+  echo "Expected app bundle at $APP_PATH but it was not found." >&2
+  exit 1
+fi
+
+rm -f "$ZIP_PATH"
+ditto -c -k --sequesterRsrc --keepParent "$APP_PATH" "$ZIP_PATH"
+
+echo
+echo "Created release zip:"
+echo "  $ZIP_PATH"

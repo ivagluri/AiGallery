@@ -5,7 +5,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APP_NAME="AiGallery"
 BUILD_CONFIG="${BUILD_CONFIG:-release}"
-VERSION="${VERSION:-}"
+VERSION="${VERSION:-${version:-}}"
 OUTPUT_NAME="$APP_NAME"
 if [[ -n "$VERSION" ]]; then
   OUTPUT_NAME="$APP_NAME-$VERSION"

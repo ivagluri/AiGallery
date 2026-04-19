@@ -68,6 +68,9 @@ struct ContentView: View {
         .onChange(of: library.categoryGroups.map(\.id)) { _ in
             expandAllGroupsIfNeeded()
         }
+        .onChange(of: library.rootURL) { _ in
+            clearSearchForRootChange()
+        }
         .onChange(of: searchText) { newValue in
             handleSearchTextChange(newValue)
         }
@@ -909,6 +912,20 @@ struct ContentView: View {
 
         pendingSearchUpdateTask = updateTask
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.18, execute: updateTask)
+    }
+
+    private func clearSearchForRootChange() {
+        guard !searchText.isEmpty || !activeSearchText.isEmpty || savedBrowseSelection != nil else {
+            return
+        }
+
+        pendingSearchUpdateTask?.cancel()
+        searchText = ""
+        activeSearchText = ""
+        activeSearchResults = .empty
+        searchSelectedImageID = nil
+        savedBrowseSelection = nil
+        isSearchFieldFocused = false
     }
 
     private func restoreBrowseSelection() {
