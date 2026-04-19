@@ -96,7 +96,7 @@ You can use AiGallery in two main ways:
 1. Point it at your own folder of AI-generated images, arranged in the folder structure described above.
 2. Use the existing `gens` folder from the https://github.com/tagexplorer/tagexplorer.github.io repo, which is how the app was originally developed and tested, and supports that specific folder structure.
 
-When the app launches, it will try to use a local `gens` folder if one exists beside the project. You can also click `Choose Folder…` at any time to switch to another root folder.
+When the app launches, it will try to use a local `gens` folder if one exists. During development that means `gens` beside the project; in a packaged `.app` it also checks for `gens` next to the app bundle. If no `gens` folder is found, the app starts empty and you can click `Choose Folder…` at any time to select a library.
 
 ## Build
 
@@ -105,6 +105,34 @@ From the project root:
 ```bash
 swift build
 ```
+
+## Create A Double-Clickable App
+
+For development, keeping the Swift package is convenient. For sharing the app with someone else, you can package the release build into a normal macOS `.app` bundle:
+
+```bash
+./scripts/build-app.sh
+```
+
+That creates:
+
+```text
+dist/AiGallery.app
+```
+
+You can then launch it from Finder like any other app, or from Terminal:
+
+```bash
+open dist/AiGallery.app
+```
+
+This keeps the repo simple while making releases much more portable. The recipient does not need a Swift build environment if you send them the built `AiGallery.app` bundle.
+
+## Notes On Distribution
+
+- The generated app bundle is unsigned for normal distribution purposes. On another Mac, Gatekeeper may warn when opening it if it was downloaded from the internet.
+- For casual sharing, zipping `dist/AiGallery.app` is usually enough.
+- For smoother public distribution, the next step would be proper Apple code signing and notarization.
 
 ## Disclaimer
 This project was built with the help of AI coding tools, primarily Codex.

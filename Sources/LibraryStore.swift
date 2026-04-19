@@ -13,8 +13,18 @@ final class LibraryStore: ObservableObject {
     private var folderMetadataCache: [String: FolderMetadata?] = [:]
 
     init() {
-        self.rootURL = Self.defaultRootURL()
-        reload()
+        let defaultRootURL = Self.defaultRootURL()
+        let fallbackRootURL = FileManager.default.homeDirectoryForCurrentUser
+        self.rootURL = defaultRootURL ?? fallbackRootURL
+
+        if defaultRootURL != nil {
+            reload()
+        } else {
+            categories = []
+            selectedCategoryID = nil
+            selectedImageID = nil
+            errorMessage = nil
+        }
     }
 
     var selectedCategory: Category? {
@@ -312,14 +322,27 @@ final class LibraryStore: ObservableObject {
         return current
     }
 
-    private static func defaultRootURL() -> URL {
+    private static func defaultRootURL() -> URL? {
         let repoRoot = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
         let gensURL = repoRoot.appendingPathComponent("gens", isDirectory: true)
-        if FileManager.default.fileExists(atPath: gensURL.path) {
+        let fileManager = FileManager.default
+
+        if fileManager.fileExists(atPath: gensURL.path) {
             return gensURL
         }
-        return repoRoot
+
+        let bundleURL = Bundle.main.bundleURL
+        let bundleCandidates = [
+            bundleURL.deletingLastPathComponent().appendingPathComponent("gens", isDirectory: true),
+            bundleURL.deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("gens", isDirectory: true)
+        ]
+
+        for candidate in bundleCandidates where fileManager.fileExists(atPath: candidate.path) {
+            return candidate
+        }
+
+        return nil
     }
 }
