@@ -19,22 +19,26 @@ I wanted an offline, native alternative to the web-based tag galleries for faste
 - Works offline
 - Keeps image libraries private on your machine
 - Feels more like a native file browser than a website
-- Can use unique or own generated images to build out a custom tag gallery simply.
+- Can use unique or own generated images to easily build out a custom tag/example gallery.
 - Generates a simpler way to navigate tag hierarchies and see PNGinfo vs just using finder.
 
 ## Folder Layout
 
 AiGallery builds it's category browser based on folder heirarchy, with a simple recursive structure.
 Each subfolder inside the selected root is treated as a category. Images inside those folders are shown in the browser, and further subfolders are subcategories.
-> Root Folder/
->  |-Category 1/
->		|-Subcategory 1/
->		|-Subcategory 2/
->			|-Sub-Subcategory 1/
-> 	|-Category 2/
+
+```text
+Root Folder/
+├─ Category 1/
+│  ├─ Subcategory 1/
+│  ├─ Subcategory 2/
+│  │  └─ Sub-Subcategory 1/
+└─ Category 2/
+```
 
 The category naming was originally shaped around the folder layout used in the TagExplorer repository, and that scheme for its folders is supported as well, using " - " as the subcategory divider.
 The app supports common image types including:
+
 - `png`
 - `jpg`
 - `jpeg`
@@ -61,4 +65,3 @@ swift build
 This project was built with the help of AI coding tools, primarily Codex.
 I am not a professional developer, so this repository is a vibe coded personal solution, but someone else might find it useful too.
 If you decide to use it, expect there may be bugs, rough edges, or missing features.
-
