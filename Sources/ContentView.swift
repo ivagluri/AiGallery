@@ -126,38 +126,43 @@ struct ContentView: View {
     }
 
     private var sidebar: some View {
-        List(selection: categorySelectionBinding) {
+        List {
             ForEach(library.categoryGroups) { group in
                 if group.isSynthetic, let category = group.categories.first, group.categories.count == 1 {
                     categoryRow(category, title: category.name, systemImage: "star.fill")
                 } else {
-                    DisclosureGroup(
-                        isExpanded: Binding(
-                            get: { expandedGroupIDs.contains(group.id) },
-                            set: { isExpanded in
-                                if isExpanded {
-                                    expandedGroupIDs.insert(group.id)
-                                } else {
-                                    expandedGroupIDs.remove(group.id)
-                                }
-                            }
-                        )
-                    ) {
-                        ForEach(group.categories) { category in
-                            categoryRow(category, title: category.shortName, systemImage: nil)
-                        }
-                    } label: {
-                        HStack {
-                            if group.isSynthetic {
-                                Label(group.name, systemImage: "star.fill")
-                                    .font(.headline)
-                            } else {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Button {
+                            toggleGroupExpansion(group.id)
+                        } label: {
+                            HStack(spacing: 8) {
+                                Image(systemName: isGroupExpanded(group.id) ? "chevron.down" : "chevron.right")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.secondary)
+                                    .frame(width: 12)
+
                                 Text(group.name)
                                     .font(.headline)
+
+                                Spacer()
+
+                                Text("\(group.categories.count)")
+                                    .foregroundStyle(.secondary)
                             }
-                            Spacer()
-                            Text("\(group.categories.count)")
-                                .foregroundStyle(.secondary)
+                            .padding(.vertical, 4)
+                            .padding(.horizontal, 8)
+                            .contentShape(Rectangle())
+                            .background(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .fill(isCollapsedActiveGroup(group) ? Color.accentColor.opacity(0.14) : Color.clear)
+                            )
+                        }
+                        .buttonStyle(.plain)
+
+                        if isGroupExpanded(group.id) {
+                            ForEach(group.categories) { category in
+                                categoryRow(category, title: category.shortName, systemImage: nil)
+                            }
                         }
                     }
                 }
@@ -367,17 +372,6 @@ struct ContentView: View {
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.2, execute: resetTask)
     }
 
-    private var categorySelectionBinding: Binding<String?> {
-        Binding(
-            get: { library.selectedCategory?.id },
-            set: { newValue in
-                guard !isSearching else { return }
-                let category = library.categories.first { $0.id == newValue }
-                library.selectCategory(category)
-            }
-        )
-    }
-
     private var imageSortOrder: ImageSortOrder {
         get { ImageSortOrder(rawValue: imageSortOrderRawValue) ?? .alphabeticalAscending }
         nonmutating set { imageSortOrderRawValue = newValue.rawValue }
@@ -583,6 +577,23 @@ struct ContentView: View {
             .split(separator: " ")
             .map { $0.lowercased().capitalized }
             .joined(separator: " ")
+    }
+
+    private func isGroupExpanded(_ groupID: String) -> Bool {
+        expandedGroupIDs.contains(groupID)
+    }
+
+    private func isCollapsedActiveGroup(_ group: CategoryGroup) -> Bool {
+        guard !isGroupExpanded(group.id) else { return false }
+        return library.selectedCategory?.rootGroupID == group.id
+    }
+
+    private func toggleGroupExpansion(_ groupID: String) {
+        if expandedGroupIDs.contains(groupID) {
+            expandedGroupIDs.remove(groupID)
+        } else {
+            expandedGroupIDs.insert(groupID)
+        }
     }
 
     private func expandAllGroupsIfNeeded() {
