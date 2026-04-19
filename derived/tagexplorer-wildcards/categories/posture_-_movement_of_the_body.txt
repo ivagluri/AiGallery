@@ -1,0 +1,12 @@
+balancing
+crawling
+midair
+falling
+floating
+flying
+jumping
+hopping
+pouncing
+running
+walking
+wallwalking

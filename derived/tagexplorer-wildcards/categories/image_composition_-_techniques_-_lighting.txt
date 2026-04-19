@@ -1,0 +1,31 @@
+backlighting
+sidelighting
+underlighting
+bloom
+sunlight
+sunbeam
+dappled sunlight
+moonlight
+spotlight
+stage lights
+caustics
+crack of light
+refraction
+light rays
+dim lighting
+morning
+dawn
+twilight
+sunrise
+day
+evening
+sunset
+dusk
+night
+shade
+tree shade
+shadow
+colored shadow
+window shadow
+dark
+darkness

@@ -1,0 +1,27 @@
+aqua theme
+black theme
+blue theme
+brown theme
+green theme
+grey theme
+orange theme
+pink theme
+purple theme
+red theme
+white theme
+yellow theme
+monochrome
+partially colored
+greyscale with colored background
+spot color
+dark
+muted color
+pale color
+sepia
+high contrast
+limited palette
+pastel colors
+double exposure
+vignetting
+inverted colors
+neon palette
