@@ -2,6 +2,7 @@ import AppKit
 import SwiftUI
 
 struct ContentView: View {
+    @Environment(\.colorScheme) private var colorScheme
     @EnvironmentObject private var library: LibraryStore
     @AppStorage("showInspector") private var showInspector = true
     @AppStorage("imageSortOrder") private var imageSortOrderRawValue = ImageSortOrder.alphabeticalAscending.rawValue
@@ -386,7 +387,30 @@ struct ContentView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
-        .background(Color(nsColor: .controlBackgroundColor).opacity(0.35))
+        .background(controlStripBackground)
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(controlStripDivider)
+                .frame(height: 1)
+        }
+    }
+
+    private var controlStripBackground: some View {
+        Rectangle()
+            .fill(
+                Color(
+                    nsColor: colorScheme == .dark
+                        ? .controlBackgroundColor
+                        : .windowBackgroundColor
+                )
+                .opacity(colorScheme == .dark ? 0.35 : 0.92)
+            )
+    }
+
+    private var controlStripDivider: Color {
+        colorScheme == .dark
+            ? Color.white.opacity(0.06)
+            : Color.black.opacity(0.10)
     }
 
     private func categoryHeader(_ category: Category) -> some View {
@@ -480,6 +504,7 @@ struct ContentView: View {
 }
 
 private struct ThumbnailCell: View {
+    @Environment(\.colorScheme) private var colorScheme
     let image: ImageItem
     let isSelected: Bool
     let thumbnailHeight: Double
@@ -513,13 +538,40 @@ private struct ThumbnailCell: View {
         .padding(10)
         .background(
             RoundedRectangle(cornerRadius: 12)
-                .fill(isSelected ? Color.accentColor.opacity(0.14) : Color(nsColor: .controlBackgroundColor))
+                .fill(cardFillColor)
         )
         .overlay(
             RoundedRectangle(cornerRadius: 12)
-                .stroke(isSelected ? Color.accentColor : Color.clear, lineWidth: 1)
+                .stroke(cardBorderColor, lineWidth: isSelected ? 1.2 : 1)
+        )
+        .shadow(
+            color: colorScheme == .dark ? .clear : Color.black.opacity(isSelected ? 0.10 : 0.06),
+            radius: colorScheme == .dark ? 0 : 8,
+            y: colorScheme == .dark ? 0 : 2
         )
         .contentShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    private var cardFillColor: Color {
+        if isSelected {
+            return Color.accentColor.opacity(colorScheme == .dark ? 0.14 : 0.12)
+        }
+
+        return Color(
+            nsColor: colorScheme == .dark
+                ? .controlBackgroundColor
+                : .windowBackgroundColor
+        )
+    }
+
+    private var cardBorderColor: Color {
+        if isSelected {
+            return Color.accentColor.opacity(colorScheme == .dark ? 0.9 : 0.75)
+        }
+
+        return colorScheme == .dark
+            ? Color.clear
+            : Color.black.opacity(0.08)
     }
 }
 
