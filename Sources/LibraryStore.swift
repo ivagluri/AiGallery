@@ -10,6 +10,7 @@ final class LibraryStore: ObservableObject {
 
     private let fileManager = FileManager.default
     private var pngInfoCache: [String: PNGInfo?] = [:]
+    private var folderMetadataCache: [String: FolderMetadata?] = [:]
 
     init() {
         self.rootURL = Self.defaultRootURL()
@@ -65,6 +66,7 @@ final class LibraryStore: ObservableObject {
 
             categories = loadedCategories
             pngInfoCache.removeAll()
+            folderMetadataCache.removeAll()
             selectedCategoryID = Self.validCategoryID(current: selectedCategoryID, categories: loadedCategories)
             selectedImageID = Self.validImageID(current: selectedImageID, categories: loadedCategories, selectedCategoryID: selectedCategoryID)
             errorMessage = nil
@@ -93,6 +95,31 @@ final class LibraryStore: ObservableObject {
         let info = PNGInfoReader.read(from: image.fileURL)
         pngInfoCache[image.id] = info
         return info
+    }
+
+    func inspectorMetadata(for image: ImageItem) -> InspectorMetadata? {
+        let pngInfo = pngInfo(for: image)
+        let folderMetadata = folderMetadata(for: image)
+
+        let prompt = pngInfo?.prompt ?? folderMetadata?.prompt
+        let negativePrompt = pngInfo?.negativePrompt ?? folderMetadata?.negativePrompt
+        let generationParameters = mergeEntries(
+            primary: pngInfo?.generationParameters ?? [],
+            fallback: folderMetadata?.generationParameters ?? []
+        )
+        let textEntries = mergeEntries(
+            primary: pngInfo?.textEntries ?? [],
+            fallback: folderMetadata?.textEntries ?? []
+        )
+
+        let metadata = InspectorMetadata(
+            prompt: prompt,
+            negativePrompt: negativePrompt,
+            generationParameters: generationParameters,
+            textEntries: textEntries
+        )
+
+        return metadata.hasVisibleContent ? metadata : nil
     }
 
     func chooseRootFolder() {
@@ -128,6 +155,28 @@ final class LibraryStore: ObservableObject {
                 inferredTag: inferredTag
             )
         }
+    }
+
+    private func folderMetadata(for image: ImageItem) -> FolderMetadata? {
+        let folderPath = image.fileURL.deletingLastPathComponent().path
+        if let cached = folderMetadataCache[folderPath] {
+            return cached
+        }
+
+        let info = FolderMetadataReader.read(from: image.fileURL.deletingLastPathComponent())
+        folderMetadataCache[folderPath] = info
+        return info
+    }
+
+    private func mergeEntries(primary: [PNGTextEntry], fallback: [PNGTextEntry]) -> [PNGTextEntry] {
+        var merged = primary
+        let existingKeys = Set(primary.map { $0.keyword.lowercased() })
+
+        for entry in fallback where !existingKeys.contains(entry.keyword.lowercased()) {
+            merged.append(entry)
+        }
+
+        return merged
     }
 
     private func discoverCategoryFolders() throws -> [URL] {

@@ -1,0 +1,14 @@
+{
+  "prompt": "expressive anime portrait, polished linework, vibrant eyes, soft rim light",
+  "negativePrompt": "blurry, low contrast, text, watermark",
+  "parameters": {
+    "Model": "illustrious-xl",
+    "Sampler": "DPM++ 2M Karras",
+    "Steps": 28,
+    "CFG Scale": 6
+  },
+  "details": {
+    "Batch": "artist study set",
+    "Format": "folder fallback metadata"
+  }
+}

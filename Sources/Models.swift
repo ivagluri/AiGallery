@@ -31,6 +31,34 @@ struct PNGInfo: Hashable {
     }
 }
 
+struct FolderMetadata: Hashable {
+    let prompt: String?
+    let negativePrompt: String?
+    let generationParameters: [PNGTextEntry]
+    let textEntries: [PNGTextEntry]
+
+    var hasVisibleContent: Bool {
+        prompt?.isEmpty == false
+            || negativePrompt?.isEmpty == false
+            || !generationParameters.isEmpty
+            || !textEntries.isEmpty
+    }
+}
+
+struct InspectorMetadata: Hashable {
+    let prompt: String?
+    let negativePrompt: String?
+    let generationParameters: [PNGTextEntry]
+    let textEntries: [PNGTextEntry]
+
+    var hasVisibleContent: Bool {
+        prompt?.isEmpty == false
+            || negativePrompt?.isEmpty == false
+            || !generationParameters.isEmpty
+            || !textEntries.isEmpty
+    }
+}
+
 struct PNGTextEntry: Hashable, Identifiable {
     let keyword: String
     let value: String

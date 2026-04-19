@@ -129,7 +129,7 @@ struct ContentView: View {
     private var inspector: some View {
         ScrollView {
             if let image = library.selectedImage {
-                let pngInfo = library.pngInfo(for: image)
+                let metadata = library.inspectorMetadata(for: image)
 
                 VStack(alignment: .leading, spacing: 16) {
                     LargePreview(imageURL: image.fileURL)
@@ -141,32 +141,32 @@ struct ContentView: View {
                         inspectorRow("Path", image.fileURL.path)
                     }
 
-                    if let pngInfo, pngInfo.hasVisibleContent {
-                        let additionalPNGEntries = pngInfo.textEntries.filter { entry in
+                    if let metadata, metadata.hasVisibleContent {
+                        let additionalMetadataEntries = metadata.textEntries.filter { entry in
                             let keyword = entry.keyword.lowercased()
                             return keyword != "parameters"
                         }
 
-                        InspectorSection("PNG Info", isExpanded: $isPNGInfoExpanded) {
-                            if pngInfo.prompt != nil || pngInfo.negativePrompt != nil {
+                        InspectorSection("Metadata", isExpanded: $isPNGInfoExpanded) {
+                            if metadata.prompt != nil || metadata.negativePrompt != nil {
                                 NestedInspectorSection("Prompts", isExpanded: $isPNGPromptsExpanded) {
-                                    if let prompt = pngInfo.prompt {
+                                    if let prompt = metadata.prompt {
                                         inspectorRow("Prompt", prompt)
                                     }
 
-                                    if let negativePrompt = pngInfo.negativePrompt {
+                                    if let negativePrompt = metadata.negativePrompt {
                                         inspectorRow("Negative Prompt", negativePrompt)
                                     }
                                 }
                             }
 
-                            if !pngInfo.generationParameters.isEmpty || !additionalPNGEntries.isEmpty {
+                            if !metadata.generationParameters.isEmpty || !additionalMetadataEntries.isEmpty {
                                 NestedInspectorSection("Details", isExpanded: $isPNGDetailsExpanded) {
-                                    ForEach(pngInfo.generationParameters) { parameter in
+                                    ForEach(metadata.generationParameters) { parameter in
                                         inspectorRow(parameter.keyword, parameter.value)
                                     }
 
-                                    ForEach(additionalPNGEntries) { entry in
+                                    ForEach(additionalMetadataEntries) { entry in
                                         inspectorRow(humanReadablePNGLabel(for: entry.keyword), entry.value)
                                     }
                                 }

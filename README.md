@@ -11,7 +11,7 @@ AiGallery scans a root folder, treats subfolders as categories, and shows the im
 
 - A sidebar with folder-driven categories
 - A central grid of image thumbnails
-- An inspector with image details and PNG generation metadata
+- An inspector with image details and generation metadata from PNG info or folder-level config files
 
 ## Why It Exists
 
@@ -43,6 +43,51 @@ The app supports common image types including:
 - `jpg`
 - `jpeg`
 - `webp`
+
+## Folder Metadata Files
+
+For formats that do not carry PNG-style embedded metadata well, such as large `.webp` sample sets, you can drop a simple metadata file into a category folder. AiGallery will use it as a fallback for every image in that folder.
+
+Supported filenames:
+
+- `aigallery.json`
+- `aigallery.cfg`
+- `metadata.json`
+- `metadata.cfg`
+
+Example `aigallery.json`:
+
+```json
+{
+  "prompt": "portrait of a fantasy mage, detailed robe embroidery, dramatic lighting",
+  "negativePrompt": "blurry, low quality, extra fingers",
+  "parameters": {
+    "Model": "illustrious-xl",
+    "Sampler": "DPM++ 2M Karras",
+    "Steps": 30,
+    "CFG Scale": 6.5
+  },
+  "details": {
+    "Batch": "iteration 04",
+    "Source": "Inspiration Gens"
+  }
+}
+```
+
+Example `aigallery.cfg`:
+
+```ini
+prompt=portrait of a fantasy mage, detailed robe embroidery, dramatic lighting
+negative_prompt=blurry, low quality, extra fingers
+Model=illustrious-xl
+Sampler=DPM++ 2M Karras
+Steps=30
+CFG Scale=6.5
+Batch=iteration 04
+Source=Inspiration Gens
+```
+
+Embedded PNG metadata still takes priority, but folder metadata fills in the inspector when an image has no readable PNG info.
 
 ## How To Use It
 
