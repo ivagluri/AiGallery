@@ -311,7 +311,7 @@ enum PNGInfoReader {
         let altText = firstTagValue(named: "rdf:li", in: xmpEntry.value)
 
         let parsedJSON = userCommentJSON.flatMap(parseDrawThingsJSON)
-        let parsedAltText = altText.flatMap(parseAutomatic1111Parameters)
+        let parsedAltText = altText.flatMap(parseDrawThingsAltText)
 
         let prompt = parsedJSON?.prompt ?? parsedAltText?.prompt
         let negativePrompt = parsedJSON?.negativePrompt ?? parsedAltText?.negativePrompt
@@ -456,13 +456,120 @@ enum PNGInfoReader {
     }
 
     private static func decodeXML<S: StringProtocol>(_ value: S) -> String {
-        String(value)
+        decodeNumericCharacterReferences(
+            String(value)
             .replacingOccurrences(of: "&quot;", with: "\"")
             .replacingOccurrences(of: "&apos;", with: "'")
             .replacingOccurrences(of: "&lt;", with: "<")
             .replacingOccurrences(of: "&gt;", with: ">")
             .replacingOccurrences(of: "&amp;", with: "&")
+        )
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
             .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func decodeNumericCharacterReferences(_ value: String) -> String {
+        guard let regex = try? NSRegularExpression(pattern: "&#(x?[0-9A-Fa-f]+);") else {
+            return value
+        }
+
+        let nsRange = NSRange(value.startIndex..., in: value)
+        var decoded = value
+
+        for match in regex.matches(in: value, range: nsRange).reversed() {
+            guard
+                let fullRange = Range(match.range(at: 0), in: decoded),
+                let codeRange = Range(match.range(at: 1), in: decoded)
+            else {
+                continue
+            }
+
+            let codeText = String(decoded[codeRange])
+            let scalarValue: UInt32?
+
+            if codeText.lowercased().hasPrefix("x") {
+                scalarValue = UInt32(codeText.dropFirst(), radix: 16)
+            } else {
+                scalarValue = UInt32(codeText, radix: 10)
+            }
+
+            guard let scalarValue, let scalar = UnicodeScalar(scalarValue) else {
+                continue
+            }
+
+            decoded.replaceSubrange(fullRange, with: String(scalar))
+        }
+
+        return decoded
+    }
+
+    private static func parseDrawThingsAltText(_ value: String) -> (prompt: String?, negativePrompt: String?, parameters: [PNGTextEntry]) {
+        let normalized = value
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard !normalized.isEmpty else {
+            return (nil, nil, [])
+        }
+
+        let lines = normalized
+            .components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        guard !lines.isEmpty else {
+            return (nil, nil, [])
+        }
+
+        let promptLine = lines[0]
+        var negativePrompt: String?
+        var parameterLines: [String] = []
+
+        for line in lines.dropFirst() {
+            if negativePrompt == nil, line.hasPrefix("- ") {
+                negativePrompt = String(line.dropFirst(2)).nilIfEmpty
+                continue
+            }
+
+            if negativePrompt == nil, line.lowercased().hasPrefix("negative prompt:") {
+                negativePrompt = line.dropFirst("negative prompt:".count)
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                    .nilIfEmpty
+                continue
+            }
+
+            parameterLines.append(line)
+        }
+
+        if negativePrompt == nil, let parameterIndex = parameterLines.firstIndex(where: { $0.contains(":") }) {
+            let possibleNegativePrompt = Array(parameterLines[..<parameterIndex])
+                .joined(separator: ", ")
+                .nilIfEmpty
+            negativePrompt = possibleNegativePrompt
+            parameterLines = Array(parameterLines[parameterIndex...])
+        }
+
+        let parametersText = parameterLines.joined(separator: ", ")
+
+        return (
+            promptLine.nilIfEmpty,
+            cleanedNegativePrompt(negativePrompt),
+            parseParameterEntries(from: parametersText.nilIfEmpty)
+        )
+    }
+
+    private static func cleanedNegativePrompt(_ value: String?) -> String? {
+        guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty else {
+            return nil
+        }
+
+        if value.hasPrefix("-") {
+            return value.drop(while: { $0 == "-" || $0.isWhitespace }).nilIfEmpty
+        }
+
+        return value.nilIfEmpty
     }
 
     private static func parseDrawThingsJSON(_ value: String) -> (prompt: String?, negativePrompt: String?, parameters: [PNGTextEntry])? {

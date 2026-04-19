@@ -47,7 +47,8 @@ The app supports common image types including:
 ## Tags
 
 For custom libraries, each image should generally represent a single tag or concept.
-The app uses the filename as the displayed tag label, replacing underscores with spaces.
+The app uses the filename as the displayed tag label, replacing underscores with spaces.  
+Files MUST have simple tag representative filenames for the concept to work properly, as the interface and search pull this information from the filename at present.  longer or different filenames won't prevent images from loading or the gallery from building, but will pollute the tag search feature with whatever the filenames contain.
 
 ```text
 Artists/

@@ -2,6 +2,8 @@ import AppKit
 import SwiftUI
 
 struct ContentView: View {
+    private static let topLevelFolderTitle = "This Folder"
+
     @Environment(\.colorScheme) private var colorScheme
     @EnvironmentObject private var library: LibraryStore
     @AppStorage("showInspector") private var showInspector = true
@@ -768,7 +770,7 @@ struct ContentView: View {
                 nodes.append(
                     SidebarNode(
                         id: "\(group.id)/__overview__",
-                        title: "Overview",
+                        title: Self.topLevelFolderTitle,
                         pathParts: category.pathParts,
                         category: category,
                         children: []
@@ -887,8 +889,8 @@ struct ContentView: View {
                 return updatedNode
             }
             .sorted { lhs, rhs in
-                if lhs.title == "Overview" || rhs.title == "Overview" {
-                    return lhs.title == "Overview"
+                if lhs.title == Self.topLevelFolderTitle || rhs.title == Self.topLevelFolderTitle {
+                    return lhs.title == Self.topLevelFolderTitle
                 }
                 return lhs.title.localizedCaseInsensitiveCompare(rhs.title) == .orderedAscending
             }
