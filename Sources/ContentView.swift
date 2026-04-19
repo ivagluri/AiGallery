@@ -133,6 +133,11 @@ struct ContentView: View {
             ForEach(Array(library.categoryGroups.enumerated()), id: \.element.id) { index, group in
                 if group.isSynthetic, let category = group.categories.first, group.categories.count == 1 {
                     categoryRow(category, title: category.name, systemImage: "star.fill")
+                        .listRowInsets(EdgeInsets(top: 2, leading: 0, bottom: 2, trailing: 0))
+                        .listRowBackground(sidebarStripeFill(for: index))
+                        .overlay(alignment: .top) {
+                            sidebarGroupDividerOverlay(isVisible: index > 0)
+                        }
                 } else {
                     sidebarGroup(group, stripeIndex: index)
                 }
@@ -144,6 +149,8 @@ struct ContentView: View {
             }
         }
         .listStyle(.plain)
+        .scrollContentBackground(.hidden)
+        .background(sidebarPaneBackground)
         .disabled(isSearching)
         .navigationSplitViewColumnWidth(min: 180, ideal: 260, max: 420)
     }
@@ -186,6 +193,9 @@ struct ContentView: View {
         .padding(.vertical, 2)
         .listRowInsets(EdgeInsets(top: 2, leading: 0, bottom: 2, trailing: 0))
         .listRowBackground(sidebarStripeFill(for: stripeIndex))
+        .overlay(alignment: .top) {
+            sidebarGroupDividerOverlay(isVisible: stripeIndex > 0)
+        }
     }
 
     private func sidebarNodeRow(_ node: SidebarNode, level: Int) -> AnyView {
@@ -660,12 +670,44 @@ struct ContentView: View {
             .joined(separator: " ")
     }
 
+    private var sidebarPaneBackground: Color {
+        Color(
+            nsColor: colorScheme == .dark
+                ? .windowBackgroundColor
+                : .controlBackgroundColor
+        )
+    }
+
     private func sidebarStripeFill(for stripeIndex: Int) -> Color {
         guard stripeIndex.isMultiple(of: 2) else {
             return Color.clear
         }
 
-        return Color.primary.opacity(colorScheme == .dark ? 0.018 : 0.012)
+        return Color.primary.opacity(colorScheme == .dark ? 0.018 : 0.05)
+    }
+
+    private var sidebarGroupDividerColor: Color {
+        let separator = Color(nsColor: .separatorColor)
+        return separator.opacity(colorScheme == .dark ? 0.45 : 0.9)
+    }
+
+    @ViewBuilder
+    private func sidebarGroupDividerOverlay(isVisible: Bool) -> some View {
+        if isVisible {
+            ZStack(alignment: .top) {
+                Rectangle()
+                    .fill(sidebarDividerBaseFill)
+                    .frame(height: 2)
+
+                Rectangle()
+                    .fill(sidebarGroupDividerColor)
+                    .frame(height: 1)
+            }
+        }
+    }
+
+    private var sidebarDividerBaseFill: Color {
+        Color(nsColor: .windowBackgroundColor)
     }
 
     private func sidebarNodes(for group: CategoryGroup) -> [SidebarNode] {
