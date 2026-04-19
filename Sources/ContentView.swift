@@ -11,6 +11,8 @@ struct ContentView: View {
     @State private var isPNGInfoExpanded = true
     @State private var isPNGPromptsExpanded = true
     @State private var isPNGDetailsExpanded = true
+    @State private var copiedInspectorValue: String?
+    @State private var copiedInspectorResetTask: DispatchWorkItem?
 
     var body: some View {
         NavigationSplitView {
@@ -198,7 +200,7 @@ struct ContentView: View {
                         }
 
                     InspectorSection("Image", isExpanded: $isImageInfoExpanded) {
-                        inspectorRow("Tag", image.inferredTag)
+                        inspectorTagRow("Tag", image.inferredTag)
                         inspectorRow("Filename", image.fileURL.lastPathComponent)
                         inspectorRow("Path", image.fileURL.path)
                     }
@@ -253,6 +255,68 @@ struct ContentView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func inspectorTagRow(_ label: String, _ value: String) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(label)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            HStack(alignment: .center, spacing: 8) {
+                Text(value)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Button {
+                    copyInspectorTag(value)
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: copiedInspectorValue == value ? "checkmark" : "doc.on.doc")
+                            .font(.caption.weight(.semibold))
+
+                        Text(copiedInspectorValue == value ? "Copied" : "Copy")
+                            .font(.caption.weight(.semibold))
+                    }
+                    .foregroundStyle(copiedInspectorValue == value ? Color.accentColor : Color.primary)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 7)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(Color(nsColor: .controlBackgroundColor))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(
+                                copiedInspectorValue == value
+                                    ? Color.accentColor.opacity(0.35)
+                                    : Color.primary.opacity(0.08),
+                                lineWidth: 1
+                            )
+                    )
+                }
+                .buttonStyle(.plain)
+                .help("Copy Tag")
+
+                Spacer(minLength: 0)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func copyInspectorTag(_ value: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(value, forType: .string)
+
+        copiedInspectorResetTask?.cancel()
+        copiedInspectorValue = value
+
+        let resetTask = DispatchWorkItem {
+            copiedInspectorValue = nil
+        }
+
+        copiedInspectorResetTask = resetTask
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2, execute: resetTask)
     }
 
     private var categorySelectionBinding: Binding<String?> {
