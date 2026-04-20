@@ -38,53 +38,88 @@ final class WindowReaderView: NSView {
     }
 }
 
-struct KeyEventMonitor: NSViewRepresentable {
-    let handler: (NSEvent) -> NSEvent?
+struct KeyAwareView: NSViewRepresentable {
+    let isActive: Bool
+    let handler: (NSEvent) -> Bool
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(handler: handler)
+        Coordinator(handler: handler, isActive: isActive)
     }
 
-    func makeNSView(context: Context) -> NSView {
-        context.coordinator.installMonitorIfNeeded()
-        return PassthroughHelperView(frame: .zero)
+    func makeNSView(context: Context) -> KeyHandlingView {
+        let view = KeyHandlingView()
+        view.coordinator = context.coordinator
+        return view
     }
 
-    func updateNSView(_ nsView: NSView, context: Context) {
+    func updateNSView(_ nsView: KeyHandlingView, context: Context) {
         context.coordinator.handler = handler
-        context.coordinator.installMonitorIfNeeded()
-    }
-
-    static func dismantleNSView(_ nsView: NSView, coordinator: Coordinator) {
-        coordinator.removeMonitor()
+        context.coordinator.isActive = isActive
+        nsView.coordinator = context.coordinator
+        nsView.activateIfNeeded()
     }
 
     final class Coordinator {
-        var handler: (NSEvent) -> NSEvent?
-        private var monitor: Any?
+        var handler: (NSEvent) -> Bool
+        var isActive: Bool
 
-        init(handler: @escaping (NSEvent) -> NSEvent?) {
+        init(handler: @escaping (NSEvent) -> Bool, isActive: Bool) {
             self.handler = handler
+            self.isActive = isActive
+        }
+    }
+}
+
+final class KeyHandlingView: NSView {
+    var coordinator: KeyAwareView.Coordinator?
+
+    override var acceptsFirstResponder: Bool {
+        true
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        activateIfNeeded()
+    }
+
+    func activateIfNeeded() {
+        guard
+            let coordinator,
+            coordinator.isActive,
+            window?.firstResponder !== self,
+            !(window?.firstResponder is NSTextView)
+        else {
+            return
         }
 
-        func installMonitorIfNeeded() {
-            guard monitor == nil else { return }
-
-            monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-                self?.handler(event) ?? event
+        DispatchQueue.main.async { [weak self] in
+            guard
+                let self,
+                let coordinator = self.coordinator,
+                coordinator.isActive,
+                !(self.window?.firstResponder is NSTextView)
+            else {
+                return
             }
+
+            self.window?.makeFirstResponder(self)
+        }
+    }
+
+    override func keyDown(with event: NSEvent) {
+        if coordinator?.handler(event) == true {
+            return
         }
 
-        func removeMonitor() {
-            if let monitor {
-                NSEvent.removeMonitor(monitor)
-                self.monitor = nil
-            }
+        super.keyDown(with: event)
+    }
+
+    override func keyUp(with event: NSEvent) {
+        if coordinator?.handler(event) == true {
+            return
         }
 
-        deinit {
-            removeMonitor()
-        }
+        super.keyUp(with: event)
     }
 }
 

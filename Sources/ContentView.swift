@@ -26,6 +26,7 @@ struct ContentView: View {
     @State private var activeSearchResults: TagSearchResult = .empty
     @StateObject private var previewController = PreviewOverlayController()
     @State private var hostWindow: NSWindow?
+    @State private var gridViewportSize: CGSize = .zero
 
     var body: some View {
         NavigationSplitView {
@@ -87,8 +88,8 @@ struct ContentView: View {
             }
         )
         .background(
-            KeyEventMonitor { event in
-                handlePreviewHotkey(event)
+            KeyAwareView(isActive: !isSearchFieldFocused) { event in
+                handleKeyEvent(event)
             }
         )
         .onDisappear {
@@ -599,27 +600,42 @@ struct ContentView: View {
     }
 
     private func imageGrid(images: [ImageItem]) -> some View {
-        ScrollView {
-            LazyVGrid(
-                columns: [GridItem(.adaptive(minimum: thumbnailSize, maximum: thumbnailSize + 40), spacing: 16)],
-                spacing: 16
-            ) {
-                ForEach(images) { image in
-                    ThumbnailCell(
-                        image: image,
-                        isSelected: image.id == displayedSelectedImage?.id,
-                        thumbnailHeight: thumbnailSize,
-                        isFavorite: library.isFavorite(image),
-                        onToggleFavorite: {
-                            library.toggleFavorite(image)
+        GeometryReader { geometry in
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVGrid(
+                        columns: gridColumns,
+                        spacing: 16
+                    ) {
+                        ForEach(images) { image in
+                            ThumbnailCell(
+                                image: image,
+                                isSelected: image.id == displayedSelectedImage?.id,
+                                thumbnailHeight: thumbnailSize,
+                                isFavorite: library.isFavorite(image),
+                                onToggleFavorite: {
+                                    library.toggleFavorite(image)
+                                }
+                            )
+                            .id(image.id)
+                            .onTapGesture {
+                                selectImage(image)
+                            }
                         }
-                    )
-                    .onTapGesture {
-                        selectImage(image)
                     }
+                    .padding(20)
+                }
+                .onAppear {
+                    updateGridViewportSize(from: geometry.size)
+                    scrollSelectedImageIntoView(using: proxy, animated: false)
+                }
+                .onChange(of: geometry.size) { newSize in
+                    updateGridViewportSize(from: newSize)
+                }
+                .onChange(of: displayedSelectedImage?.id) { _ in
+                    scrollSelectedImageIntoView(using: proxy, animated: true)
                 }
             }
-            .padding(20)
         }
     }
 
@@ -1066,15 +1082,39 @@ struct ContentView: View {
         }
     }
 
-    private func handlePreviewHotkey(_ event: NSEvent) -> NSEvent? {
+    private func handleKeyEvent(_ event: NSEvent) -> Bool {
+        if event.type == .keyUp, isHandledNavigationKeyUp(event) {
+            return true
+        }
+
         guard
             event.type == .keyDown,
             event.window === hostWindow,
             !previewController.isPresented
         else {
-            return event
+            return false
         }
 
+        if let previewEventResult = handlePreviewHotkey(event) {
+            return handleNavigationHotkey(previewEventResult) == nil
+        }
+
+        return true
+    }
+
+    private func isHandledNavigationKeyUp(_ event: NSEvent) -> Bool {
+        guard event.window === hostWindow else {
+            return false
+        }
+
+        if navigationKey(for: event) != nil {
+            return true
+        }
+
+        return event.keyCode == 49 && shouldHandlePreviewHotkey(event)
+    }
+
+    private func handlePreviewHotkey(_ event: NSEvent) -> NSEvent? {
         guard shouldHandlePreviewHotkey(event) else {
             return event
         }
@@ -1102,6 +1142,156 @@ struct ContentView: View {
         return !isSearchFieldFocused && !(hostWindow?.firstResponder is NSTextView)
     }
 
+    private func handleNavigationHotkey(_ event: NSEvent) -> NSEvent? {
+        guard let navigationKey = navigationKey(for: event), shouldHandleNavigationHotkey(event) else {
+            return event
+        }
+
+        let columns = estimatedGridColumnCount
+        let pageStep = estimatedPageStep
+
+        let delta: Int?
+        let absoluteIndex: Int?
+
+        switch navigationKey {
+        case .down:
+            delta = columns
+            absoluteIndex = nil
+        case .up:
+            delta = -columns
+            absoluteIndex = nil
+        case .pageUp:
+            delta = -pageStep
+            absoluteIndex = nil
+        case .pageDown:
+            delta = pageStep
+            absoluteIndex = nil
+        case .home:
+            delta = nil
+            absoluteIndex = 0
+        case .end:
+            delta = nil
+            absoluteIndex = max(displayImages.count - 1, 0)
+        case .left:
+            delta = -1
+            absoluteIndex = nil
+        case .right:
+            delta = 1
+            absoluteIndex = nil
+        }
+
+        moveSelection(delta: delta, absoluteIndex: absoluteIndex)
+        return nil
+    }
+
+    private func shouldHandleNavigationHotkey(_ event: NSEvent) -> Bool {
+        guard !displayImages.isEmpty else {
+            return false
+        }
+
+        let disallowedModifiers = event.modifierFlags.intersection([.command, .control, .option])
+        guard disallowedModifiers.isEmpty else {
+            return false
+        }
+
+        return !isSearchFieldFocused && !(hostWindow?.firstResponder is NSTextView)
+    }
+
+    private func moveSelection(delta: Int?, absoluteIndex: Int?) {
+        let images = displayImages
+        guard !images.isEmpty else { return }
+
+        let currentID = displayedSelectedImage?.id
+        let currentIndex = currentID.flatMap { id in
+            images.firstIndex { $0.id == id }
+        } ?? 0
+
+        let targetIndex: Int
+        if let absoluteIndex {
+            targetIndex = min(max(absoluteIndex, 0), images.count - 1)
+        } else if let delta {
+            let proposedIndex = currentIndex + delta
+            guard images.indices.contains(proposedIndex) else {
+                return
+            }
+            targetIndex = proposedIndex
+        } else {
+            return
+        }
+
+        guard images.indices.contains(targetIndex) else { return }
+        selectImage(images[targetIndex])
+    }
+
+    private var gridColumns: [GridItem] {
+        Array(
+            repeating: GridItem(.flexible(minimum: thumbnailSize, maximum: thumbnailSize + 40), spacing: 16),
+            count: estimatedGridColumnCount
+        )
+    }
+
+    private var estimatedGridColumnCount: Int {
+        let availableWidth = max(gridViewportSize.width - 40, thumbnailSize)
+        let approximateCellWidth = thumbnailSize + 16
+        return max(Int((availableWidth + 16) / approximateCellWidth), 1)
+    }
+
+    private var estimatedPageStep: Int {
+        let availableHeight = max(gridViewportSize.height - 40, thumbnailSize)
+        let approximateRowHeight = thumbnailSize + 44
+        let rows = max(Int((availableHeight + 16) / approximateRowHeight), 1)
+        return max(estimatedGridColumnCount * rows, 1)
+    }
+
+    private func scrollSelectedImageIntoView(using proxy: ScrollViewProxy, animated: Bool) {
+        guard let selectedImageID = displayedSelectedImage?.id else {
+            return
+        }
+
+        let scrollAction = {
+            proxy.scrollTo(selectedImageID, anchor: .center)
+        }
+
+        if animated {
+            withAnimation(.easeInOut(duration: 0.12)) {
+                scrollAction()
+            }
+        } else {
+            scrollAction()
+        }
+    }
+
+    private func updateGridViewportSize(from size: CGSize) {
+        guard size != .zero else {
+            return
+        }
+
+        gridViewportSize = size
+    }
+
+    private func navigationKey(for event: NSEvent) -> NavigationKey? {
+        switch Int(event.keyCode) {
+        case 123:
+            return .left
+        case 124:
+            return .right
+        case 125:
+            return .down
+        case 126:
+            return .up
+        case 116:
+            return .pageUp
+        case 121:
+            return .pageDown
+        case 115:
+            return .home
+        case 119:
+            return .end
+        default:
+            return nil
+        }
+    }
+
     private func relinquishSearchFocus() {
         guard isSearchFieldFocused || hostWindow?.firstResponder is NSTextView else {
             return
@@ -1119,6 +1309,17 @@ struct ContentView: View {
 private struct BrowseSelection {
     let categoryID: Category.ID?
     let imageID: ImageItem.ID?
+}
+
+private enum NavigationKey {
+    case left
+    case right
+    case up
+    case down
+    case pageUp
+    case pageDown
+    case home
+    case end
 }
 
 private struct SidebarNode: Identifiable, Hashable {
