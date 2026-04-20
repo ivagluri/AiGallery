@@ -85,6 +85,9 @@ struct ContentView: View {
         .onChange(of: searchText) { newValue in
             handleSearchTextChange(newValue)
         }
+        .onChange(of: displayedSelectedImage?.id) { _ in
+            syncPreviewSession()
+        }
         .background(
             HostWindowReader { window in
                 hostWindow = window
@@ -531,6 +534,7 @@ struct ContentView: View {
 
                 Spacer(minLength: 12)
 
+                previewButton
                 sortButton
                 thumbnailSizeControl
             }
@@ -540,6 +544,7 @@ struct ContentView: View {
                 categoryHeader(title: title, subtitle: subtitle)
 
                 HStack(spacing: 16) {
+                    previewButton
                     sortButton
                     Spacer(minLength: 8)
                     thumbnailSizeControl
@@ -550,6 +555,7 @@ struct ContentView: View {
             VStack(alignment: .leading, spacing: 12) {
                 categoryHeader(title: title, subtitle: subtitle)
 
+                previewButton
                 sortButton
 
                 thumbnailSizeControl
@@ -620,13 +626,16 @@ struct ContentView: View {
                                 thumbnailHeight: thumbnailSize,
                                 isFavorite: library.isFavorite(image),
                                 suspendThumbnailLoading: isInspectorResizing,
+                                onSelect: {
+                                    selectImage(image)
+                                },
+                                onOpenPreview: {
+                                    openPreview(for: image)
+                                },
                                 onToggleFavorite: {
                                     library.toggleFavorite(image)
                                 }
                             )
-                            .onTapGesture {
-                                selectImage(image)
-                            }
                         }
                     }
                     .padding(20)
@@ -690,6 +699,17 @@ struct ContentView: View {
         }
         .labelStyle(.iconOnly)
         .help(imageSortOrder.helpText)
+    }
+
+    private var previewButton: some View {
+        Button {
+            presentPreview()
+        } label: {
+            Label("Open Preview", systemImage: "arrow.up.left.and.arrow.down.right")
+        }
+        .labelStyle(.iconOnly)
+        .help("Open Large Preview")
+        .disabled(displayedSelectedImage == nil)
     }
 
     private var thumbnailSizeControl: some View {
@@ -1128,7 +1148,11 @@ struct ContentView: View {
         }
 
         if let previewEventResult = handlePreviewHotkey(event) {
-            return handleNavigationHotkey(previewEventResult) == nil
+            if let favoriteEventResult = handleFavoriteHotkey(previewEventResult) {
+                return handleNavigationHotkey(favoriteEventResult) == nil
+            }
+
+            return true
         }
 
         return true
@@ -1143,7 +1167,11 @@ struct ContentView: View {
             return true
         }
 
-        return event.keyCode == 49 && shouldHandlePreviewHotkey(event)
+        if event.keyCode == 49 && shouldHandlePreviewHotkey(event) {
+            return true
+        }
+
+        return isFavoriteHotkey(event) && shouldHandleFavoriteHotkey(event)
     }
 
     private func handlePreviewHotkey(_ event: NSEvent) -> NSEvent? {
@@ -1151,10 +1179,19 @@ struct ContentView: View {
             return event
         }
 
-        previewController.toggle(
-            session: PreviewOverlaySession(image: displayedSelectedImage),
-            from: hostWindow
-        )
+        togglePreview()
+        return nil
+    }
+
+    private func handleFavoriteHotkey(_ event: NSEvent) -> NSEvent? {
+        guard isFavoriteHotkey(event), shouldHandleFavoriteHotkey(event) else {
+            return event
+        }
+
+        if let image = displayedSelectedImage {
+            library.toggleFavorite(image)
+        }
+
         return nil
     }
 
@@ -1228,6 +1265,19 @@ struct ContentView: View {
 
         moveSelection(delta: delta, absoluteIndex: absoluteIndex, scrollBehavior: scrollBehavior)
         return nil
+    }
+
+    private func shouldHandleFavoriteHotkey(_ event: NSEvent) -> Bool {
+        guard displayedSelectedImage != nil else {
+            return false
+        }
+
+        let disallowedModifiers = event.modifierFlags.intersection([.command, .control, .option])
+        guard disallowedModifiers.isEmpty else {
+            return false
+        }
+
+        return !isSearchFieldFocused && !(hostWindow?.firstResponder is NSTextView)
     }
 
     private func shouldHandleNavigationHotkey(_ event: NSEvent) -> Bool {
@@ -1329,6 +1379,10 @@ struct ContentView: View {
         }
     }
 
+    private func isFavoriteHotkey(_ event: NSEvent) -> Bool {
+        event.keyCode == 3
+    }
+
     private func relinquishSearchFocus() {
         guard isSearchFieldFocused || hostWindow?.firstResponder is NSTextView else {
             return
@@ -1336,6 +1390,98 @@ struct ContentView: View {
 
         isSearchFieldFocused = false
         hostWindow?.makeFirstResponder(nil)
+    }
+
+    private func syncPreviewSession() {
+        guard previewController.isPresented else {
+            return
+        }
+
+        previewController.update(session: previewOverlaySession())
+    }
+
+    private func togglePreview() {
+        if previewController.isPresented {
+            previewController.dismiss()
+            return
+        }
+
+        presentPreview()
+    }
+
+    private func presentPreview() {
+        guard displayedSelectedImage != nil else {
+            return
+        }
+
+        schedulePreviewPresentation()
+    }
+
+    private func openPreview(for image: ImageItem) {
+        selectImage(image)
+        presentPreview()
+    }
+
+    private func schedulePreviewPresentation() {
+        DispatchQueue.main.async {
+            previewController.present(
+                session: previewOverlaySession(),
+                from: hostWindow
+            )
+        }
+    }
+
+    private func previewOverlaySession() -> PreviewOverlaySession {
+        let images = displayImages
+        let currentID = displayedSelectedImage?.id
+        let currentIndex = currentID.flatMap { id in
+            images.firstIndex { $0.id == id }
+        }
+        let hasPrevious = (currentIndex ?? 0) > 0
+        let hasNext = (currentIndex ?? -1) >= 0 && (currentIndex ?? -1) < images.count - 1
+
+        return PreviewOverlaySession(
+            image: displayedSelectedImage,
+            capabilities: PreviewOverlayCapabilities(
+                supportsNavigation: true,
+                supportsFavorite: true,
+                supportsMetadata: false
+            ),
+            isFavorite: displayedSelectedImage.map { library.isFavorite($0) } ?? false,
+            canNavigatePrevious: hasPrevious,
+            canNavigateNext: hasNext,
+            onNavigate: { action in
+                handlePreviewNavigation(action)
+            },
+            onToggleFavorite: {
+                guard let image = displayedSelectedImage else { return }
+                library.toggleFavorite(image)
+                syncPreviewSession()
+            }
+        )
+    }
+
+    private func handlePreviewNavigation(_ action: PreviewOverlayNavigationAction) {
+        let scrollBehavior: GridScrollBehavior = .selectionOnly
+
+        switch action {
+        case .previous:
+            moveSelection(delta: -1, absoluteIndex: nil, scrollBehavior: scrollBehavior)
+        case .next:
+            moveSelection(delta: 1, absoluteIndex: nil, scrollBehavior: scrollBehavior)
+        case .up:
+            moveSelection(delta: -gridLayoutMetrics.columns, absoluteIndex: nil, scrollBehavior: scrollBehavior)
+        case .down:
+            moveSelection(delta: gridLayoutMetrics.columns, absoluteIndex: nil, scrollBehavior: scrollBehavior)
+        case .pageUp:
+            moveSelection(delta: -gridLayoutMetrics.pageStep, absoluteIndex: nil, scrollBehavior: scrollBehavior)
+        case .pageDown:
+            moveSelection(delta: gridLayoutMetrics.pageStep, absoluteIndex: nil, scrollBehavior: scrollBehavior)
+        case .home:
+            moveSelection(delta: nil, absoluteIndex: 0, scrollBehavior: scrollBehavior)
+        case .end:
+            moveSelection(delta: nil, absoluteIndex: max(displayImages.count - 1, 0), scrollBehavior: scrollBehavior)
+        }
     }
 
     private static let maximumSearchResults = 300
@@ -1636,6 +1782,8 @@ private struct ThumbnailCell: View {
     let thumbnailHeight: Double
     let isFavorite: Bool
     let suspendThumbnailLoading: Bool
+    let onSelect: () -> Void
+    let onOpenPreview: () -> Void
     let onToggleFavorite: () -> Void
 
     var body: some View {
@@ -1681,6 +1829,15 @@ private struct ThumbnailCell: View {
             y: colorScheme == .dark ? 0 : 2
         )
         .contentShape(RoundedRectangle(cornerRadius: 12))
+        .onTapGesture {
+            onSelect()
+        }
+        .simultaneousGesture(
+            TapGesture(count: 2)
+                .onEnded {
+                    onOpenPreview()
+                }
+        )
     }
 
     private var cardFillColor: Color {

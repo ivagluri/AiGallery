@@ -10,6 +10,22 @@ struct PreviewOverlayCapabilities {
 struct PreviewOverlaySession {
     let image: ImageItem?
     var capabilities = PreviewOverlayCapabilities()
+    var isFavorite = false
+    var canNavigatePrevious = false
+    var canNavigateNext = false
+    var onNavigate: ((PreviewOverlayNavigationAction) -> Void)?
+    var onToggleFavorite: (() -> Void)?
+}
+
+enum PreviewOverlayNavigationAction {
+    case previous
+    case next
+    case up
+    case down
+    case pageUp
+    case pageDown
+    case home
+    case end
 }
 
 @MainActor
@@ -36,6 +52,15 @@ final class PreviewOverlayController: NSObject, ObservableObject, NSWindowDelega
         }
     }
 
+    func present(session: PreviewOverlaySession, from sourceWindow: NSWindow?) {
+        guard session.image != nil, let sourceWindow else {
+            dismiss()
+            return
+        }
+
+        show(session: session, from: sourceWindow)
+    }
+
     func dismiss() {
         guard let panel else { return }
 
@@ -54,6 +79,21 @@ final class PreviewOverlayController: NSObject, ObservableObject, NSWindowDelega
             self.hostingController = nil
             self.panel = nil
             self.sourceWindow = nil
+        }
+    }
+
+    func update(session: PreviewOverlaySession) {
+        activeSession = session
+
+        guard isPresented else { return }
+
+        guard session.image != nil else {
+            dismiss()
+            return
+        }
+
+        hostingController?.rootView = PreviewOverlayView(session: session) { [weak self] in
+            self?.dismiss()
         }
     }
 
@@ -168,6 +208,33 @@ final class PreviewOverlayController: NSObject, ObservableObject, NSWindowDelega
                 Task { @MainActor [weak self] in
                     self?.dismiss()
                 }
+                return nil
+            case 123:
+                self.activeSession?.onNavigate?(.previous)
+                return nil
+            case 124:
+                self.activeSession?.onNavigate?(.next)
+                return nil
+            case 125:
+                self.activeSession?.onNavigate?(.down)
+                return nil
+            case 126:
+                self.activeSession?.onNavigate?(.up)
+                return nil
+            case 116:
+                self.activeSession?.onNavigate?(.pageUp)
+                return nil
+            case 121:
+                self.activeSession?.onNavigate?(.pageDown)
+                return nil
+            case 115:
+                self.activeSession?.onNavigate?(.home)
+                return nil
+            case 119:
+                self.activeSession?.onNavigate?(.end)
+                return nil
+            case 3:
+                self.activeSession?.onToggleFavorite?()
                 return nil
             default:
                 return nil

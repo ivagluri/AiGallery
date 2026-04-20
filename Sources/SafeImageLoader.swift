@@ -76,6 +76,27 @@ enum SafeImageLoader {
         return cache.object(forKey: cacheKey)
     }
 
+    static func imagePixelSize(for fileURL: URL) -> CGSize? {
+        guard
+            let source = CGImageSourceCreateWithURL(fileURL as CFURL, [
+                kCGImageSourceShouldCache: false
+            ] as CFDictionary),
+            let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, [
+                kCGImageSourceShouldCache: false
+            ] as CFDictionary) as? [CFString: Any],
+            let pixelWidth = properties[kCGImagePropertyPixelWidth] as? Int,
+            let pixelHeight = properties[kCGImagePropertyPixelHeight] as? Int,
+            pixelWidth > 0,
+            pixelHeight > 0,
+            pixelWidth <= metadataDimensionSanityLimit,
+            pixelHeight <= metadataDimensionSanityLimit
+        else {
+            return nil
+        }
+
+        return CGSize(width: pixelWidth, height: pixelHeight)
+    }
+
     static func loadImage(for fileURL: URL, maximumThumbnailDimension: Int) -> LoadResult {
         let clampedDimension = max(1, maximumThumbnailDimension)
         let cacheKey = "\(fileURL.path)#\(clampedDimension)" as NSString
