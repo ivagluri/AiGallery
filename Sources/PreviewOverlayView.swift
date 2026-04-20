@@ -83,13 +83,17 @@ private struct PreviewOverlayImage: View {
 
     var body: some View {
         Group {
-            if let nsImage = NSImage(contentsOf: imageURL) {
+            switch SafeImageLoader.loadImage(for: imageURL, maximumThumbnailDimension: 3_072) {
+            case .success(let nsImage):
                 Image(nsImage: nsImage)
                     .resizable()
                     .interpolation(.high)
                     .scaledToFit()
                     .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-            } else {
+            case .blocked(let reason):
+                PreviewOverlayPlaceholder(title: reason.title, systemImage: "shield", description: reason.message)
+                    .frame(minWidth: 320, minHeight: 240)
+            case .failed:
                 PreviewOverlayPlaceholder(title: "No Preview", systemImage: "photo")
                     .frame(minWidth: 320, minHeight: 240)
             }
@@ -100,6 +104,7 @@ private struct PreviewOverlayImage: View {
 private struct PreviewOverlayPlaceholder: View {
     let title: String
     let systemImage: String
+    var description: String?
 
     var body: some View {
         VStack(spacing: 12) {
@@ -109,6 +114,13 @@ private struct PreviewOverlayPlaceholder: View {
 
             Text(title)
                 .font(.headline)
+
+            if let description, !description.isEmpty {
+                Text(description)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(24)

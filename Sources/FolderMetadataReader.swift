@@ -1,6 +1,7 @@
 import Foundation
 
 enum FolderMetadataReader {
+    private static let maximumMetadataFileSize = 1 * 1_024 * 1_024
     private static let supportedFileNames = [
         "aigallery.json",
         "aigallery.cfg",
@@ -36,7 +37,10 @@ enum FolderMetadataReader {
 
     private static func readJSON(from fileURL: URL) -> FolderMetadata? {
         guard
-            let data = try? Data(contentsOf: fileURL),
+            let fileSize = (try? fileURL.resourceValues(forKeys: [.fileSizeKey]))?.fileSize,
+            fileSize > 0,
+            fileSize <= maximumMetadataFileSize,
+            let data = try? Data(contentsOf: fileURL, options: .mappedIfSafe),
             let object = try? JSONSerialization.jsonObject(with: data),
             let dictionary = object as? [String: Any]
         else {
@@ -67,7 +71,12 @@ enum FolderMetadataReader {
     }
 
     private static func readCFG(from fileURL: URL) -> FolderMetadata? {
-        guard let content = try? String(contentsOf: fileURL, encoding: .utf8) else {
+        guard
+            let fileSize = (try? fileURL.resourceValues(forKeys: [.fileSizeKey]))?.fileSize,
+            fileSize > 0,
+            fileSize <= maximumMetadataFileSize,
+            let content = try? String(contentsOf: fileURL, encoding: .utf8)
+        else {
             return nil
         }
 

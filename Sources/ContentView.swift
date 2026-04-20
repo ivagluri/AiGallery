@@ -1661,12 +1661,15 @@ private struct ThumbnailImage: View {
 
     var body: some View {
         Group {
-            if let nsImage = NSImage(contentsOf: imageURL) {
+            switch SafeImageLoader.loadImage(for: imageURL, maximumThumbnailDimension: 768) {
+            case .success(let nsImage):
                 Image(nsImage: nsImage)
                     .resizable()
                     .interpolation(.high)
                     .scaledToFit()
-            } else {
+            case .blocked:
+                PlaceholderView(title: "", systemImage: "shield")
+            case .failed:
                 PlaceholderView(title: "No Preview", systemImage: "photo")
             }
         }
@@ -1678,13 +1681,17 @@ private struct LargePreview: View {
 
     var body: some View {
         Group {
-            if let nsImage = NSImage(contentsOf: imageURL) {
+            switch SafeImageLoader.loadImage(for: imageURL, maximumThumbnailDimension: 2_048) {
+            case .success(let nsImage):
                 Image(nsImage: nsImage)
                     .resizable()
                     .interpolation(.high)
                     .scaledToFit()
                     .clipShape(RoundedRectangle(cornerRadius: 14))
-            } else {
+            case .blocked(let reason):
+                PlaceholderView(title: reason.title, systemImage: "shield", description: reason.message)
+                    .frame(height: 260)
+            case .failed:
                 PlaceholderView(title: "No Preview", systemImage: "photo")
                     .frame(height: 260)
             }

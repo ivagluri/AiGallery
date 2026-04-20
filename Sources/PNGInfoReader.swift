@@ -2,16 +2,38 @@ import Compression
 import Foundation
 
 enum PNGInfoReader {
+    private static let pngSignature = Data([137, 80, 78, 71, 13, 10, 26, 10])
+    private static let maximumFileSize = 128 * 1_024 * 1_024
+    private static let maximumChunkDataLength = 8 * 1_024 * 1_024
+    private static let maximumTextEntryCount = 64
+    private static let maximumKeywordLength = 80
+    private static let maximumTextValueLength = 1 * 1_024 * 1_024
+    private static let maximumCompressedTextLength = 4 * 1_024 * 1_024
+    private static let maximumTotalTextBytes = 8 * 1_024 * 1_024
+    private static let maximumDecompressedTextLength = 1 * 1_024 * 1_024
+
     static func read(from fileURL: URL) -> PNGInfo? {
         guard fileURL.pathExtension.lowercased() == "png" else {
             return nil
         }
 
-        guard let data = try? Data(contentsOf: fileURL), data.count > 8 else {
+        guard
+            let fileSize = (try? fileURL.resourceValues(forKeys: [.fileSizeKey]))?.fileSize,
+            fileSize > pngSignature.count,
+            fileSize <= maximumFileSize
+        else {
             return nil
         }
 
-        guard data.starts(with: Data([137, 80, 78, 71, 13, 10, 26, 10])) else {
+        guard
+            let data = try? Data(contentsOf: fileURL, options: .mappedIfSafe),
+            data.count > pngSignature.count,
+            data.count <= maximumFileSize
+        else {
+            return nil
+        }
+
+        guard data.starts(with: pngSignature) else {
             return nil
         }
 
@@ -43,14 +65,20 @@ enum PNGInfoReader {
     private static func parseTextEntries(from data: Data) -> [PNGTextEntry] {
         var entries: [PNGTextEntry] = []
         var offset = 8
+        var totalTextBytes = 0
 
         while offset + 12 <= data.count {
             guard let length = readUInt32(in: data, at: offset) else {
                 break
             }
 
+            let chunkLength = Int(length)
+            guard chunkLength <= maximumChunkDataLength else {
+                break
+            }
+
             let chunkDataStart = offset + 8
-            let chunkDataEnd = chunkDataStart + Int(length)
+            let chunkDataEnd = chunkDataStart + chunkLength
             let chunkEnd = chunkDataEnd + 4
 
             guard chunkEnd <= data.count else {
@@ -65,18 +93,25 @@ enum PNGInfoReader {
             case "tEXt":
                 if let entry = parseTextChunk(chunkData) {
                     entries.append(entry)
+                    totalTextBytes += entry.keyword.utf8.count + entry.value.utf8.count
                 }
             case "zTXt":
                 if let entry = parseCompressedTextChunk(chunkData) {
                     entries.append(entry)
+                    totalTextBytes += entry.keyword.utf8.count + entry.value.utf8.count
                 }
             case "iTXt":
                 if let entry = parseInternationalTextChunk(chunkData) {
                     entries.append(entry)
+                    totalTextBytes += entry.keyword.utf8.count + entry.value.utf8.count
                 }
             case "IEND":
                 return entries
             default:
+                break
+            }
+
+            if entries.count >= maximumTextEntryCount || totalTextBytes >= maximumTotalTextBytes {
                 break
             }
 
@@ -93,6 +128,9 @@ enum PNGInfoReader {
 
         let keywordData = data.prefix(upTo: separatorIndex)
         let valueData = data.suffix(from: data.index(after: separatorIndex))
+        guard keywordData.count <= maximumKeywordLength, valueData.count <= maximumTextValueLength else {
+            return nil
+        }
 
         guard
             let keyword = String(data: keywordData, encoding: .isoLatin1)?.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -113,6 +151,9 @@ enum PNGInfoReader {
 
         let keywordData = data.prefix(upTo: separatorIndex)
         let remaining = data.suffix(from: data.index(after: separatorIndex))
+        guard keywordData.count <= maximumKeywordLength else {
+            return nil
+        }
 
         guard
             let keyword = String(data: keywordData, encoding: .isoLatin1)?.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -125,7 +166,8 @@ enum PNGInfoReader {
 
         let compressed = Data(remaining.dropFirst())
         guard
-            let decompressed = decompressZlib(compressed),
+            compressed.count <= maximumCompressedTextLength,
+            let decompressed = decompressZlib(compressed, maximumOutputSize: maximumDecompressedTextLength),
             let value = String(data: decompressed, encoding: .isoLatin1)?.trimmingCharacters(in: .whitespacesAndNewlines),
             !value.isEmpty
         else {
@@ -141,6 +183,9 @@ enum PNGInfoReader {
         }
 
         let keywordData = data.prefix(upTo: keywordEnd)
+        guard keywordData.count <= maximumKeywordLength else {
+            return nil
+        }
         guard
             let keyword = String(data: keywordData, encoding: .isoLatin1)?.trimmingCharacters(in: .whitespacesAndNewlines),
             !keyword.isEmpty
@@ -179,13 +224,20 @@ enum PNGInfoReader {
             guard compressionMethod == 0 else {
                 return nil
             }
-            decodedText = decompressZlib(textData)
+            guard textData.count <= maximumCompressedTextLength else {
+                return nil
+            }
+            decodedText = decompressZlib(textData, maximumOutputSize: maximumDecompressedTextLength)
         } else {
+            guard textData.count <= maximumTextValueLength else {
+                return nil
+            }
             decodedText = textData
         }
 
         guard
             let decodedText,
+            decodedText.count <= maximumDecompressedTextLength,
             let value = String(data: decodedText, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
             !value.isEmpty
         else {
@@ -753,34 +805,66 @@ enum PNGInfoReader {
         }
     }
 
-    private static func decompressZlib(_ data: Data) -> Data? {
+    private static func decompressZlib(_ data: Data, maximumOutputSize: Int) -> Data? {
         guard !data.isEmpty else {
             return Data()
         }
 
-        return data.withUnsafeBytes { sourceBuffer in
-            guard let sourcePointer = sourceBuffer.bindMemory(to: UInt8.self).baseAddress else {
+        guard maximumOutputSize > 0 else {
+            return nil
+        }
+
+        return data.withUnsafeBytes { sourceBuffer -> Data? in
+            guard let sourceBaseAddress = sourceBuffer.bindMemory(to: UInt8.self).baseAddress else {
                 return nil
             }
 
-            let destinationCapacity = max(data.count * 8, 4096)
+            let streamBasePointer = UnsafeMutablePointer<compression_stream>.allocate(capacity: 1)
+            defer { streamBasePointer.deallocate() }
+
+            var stream = streamBasePointer.pointee
+            let status = compression_stream_init(&stream, COMPRESSION_STREAM_DECODE, COMPRESSION_ZLIB)
+            guard status != COMPRESSION_STATUS_ERROR else {
+                return nil
+            }
+            defer { compression_stream_destroy(&stream) }
+
+            stream.src_ptr = sourceBaseAddress
+            stream.src_size = data.count
+
+            let destinationCapacity = min(max(data.count * 4, 4096), maximumOutputSize)
             let destinationPointer = UnsafeMutablePointer<UInt8>.allocate(capacity: destinationCapacity)
             defer { destinationPointer.deallocate() }
 
-            let decompressedSize = compression_decode_buffer(
-                destinationPointer,
-                destinationCapacity,
-                sourcePointer,
-                data.count,
-                nil,
-                COMPRESSION_ZLIB
-            )
+            var output = Data()
 
-            guard decompressedSize > 0 else {
-                return nil
+            while true {
+                stream.dst_ptr = destinationPointer
+                stream.dst_size = destinationCapacity
+
+                let streamStatus = compression_stream_process(&stream, Int32(COMPRESSION_STREAM_FINALIZE.rawValue))
+                let producedCount = destinationCapacity - stream.dst_size
+
+                if producedCount > 0 {
+                    if output.count + producedCount > maximumOutputSize {
+                        return nil
+                    }
+
+                    output.append(destinationPointer, count: producedCount)
+                }
+
+                switch streamStatus {
+                case COMPRESSION_STATUS_OK:
+                    if stream.dst_size == 0 && output.count >= maximumOutputSize {
+                        return nil
+                    }
+                    continue
+                case COMPRESSION_STATUS_END:
+                    return output
+                default:
+                    return nil
+                }
             }
-
-            return Data(bytes: destinationPointer, count: decompressedSize)
         }
     }
 }
