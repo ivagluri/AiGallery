@@ -25,8 +25,11 @@ struct ContentView: View {
     @State private var pendingSearchUpdateTask: DispatchWorkItem?
     @State private var activeSearchResults: TagSearchResult = .empty
     @StateObject private var previewController = PreviewOverlayController()
+    @StateObject private var displayImageCache = DisplayImageCache()
     @State private var hostWindow: NSWindow?
-    @State private var gridViewportSize: CGSize = .zero
+    @State private var gridLayoutMetrics = GridLayoutMetrics(columns: 1, pageStep: 1)
+    @State private var pendingScrollRequest: GridScrollRequest?
+    @State private var isInspectorResizing = false
 
     var body: some View {
         NavigationSplitView {
@@ -101,6 +104,7 @@ struct ContentView: View {
         InspectorSplitView(
             isInspectorVisible: $showInspector,
             inspectorWidth: $inspectorPanelWidth,
+            isInspectorResizing: $isInspectorResizing,
             minPrimaryWidth: 320,
             minInspectorWidth: 240,
             primary: thumbnailGrid,
@@ -600,7 +604,9 @@ struct ContentView: View {
     }
 
     private func imageGrid(images: [ImageItem]) -> some View {
-        GeometryReader { geometry in
+        let selectedImageID = displayedSelectedImage?.id
+
+        return GeometryReader { geometry in
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVGrid(
@@ -610,14 +616,14 @@ struct ContentView: View {
                         ForEach(images) { image in
                             ThumbnailCell(
                                 image: image,
-                                isSelected: image.id == displayedSelectedImage?.id,
+                                isSelected: image.id == selectedImageID,
                                 thumbnailHeight: thumbnailSize,
                                 isFavorite: library.isFavorite(image),
+                                suspendThumbnailLoading: isInspectorResizing,
                                 onToggleFavorite: {
                                     library.toggleFavorite(image)
                                 }
                             )
-                            .id(image.id)
                             .onTapGesture {
                                 selectImage(image)
                             }
@@ -626,14 +632,35 @@ struct ContentView: View {
                     .padding(20)
                 }
                 .onAppear {
-                    updateGridViewportSize(from: geometry.size)
-                    scrollSelectedImageIntoView(using: proxy, animated: false)
+                    updateGridLayoutMetrics(from: geometry.size)
                 }
                 .onChange(of: geometry.size) { newSize in
-                    updateGridViewportSize(from: newSize)
+                    if !isInspectorResizing {
+                        updateGridLayoutMetrics(from: newSize)
+                    }
                 }
-                .onChange(of: displayedSelectedImage?.id) { _ in
-                    scrollSelectedImageIntoView(using: proxy, animated: true)
+                .onChange(of: thumbnailSize) { _ in
+                    updateGridLayoutMetrics(from: geometry.size)
+                }
+                .onChange(of: isInspectorResizing) { isResizing in
+                    if !isResizing {
+                        updateGridLayoutMetrics(from: geometry.size)
+                    }
+                }
+                .onChange(of: pendingScrollRequest) { request in
+                    guard let request else { return }
+
+                    if request.animated {
+                        withAnimation(.easeInOut(duration: 0.12)) {
+                            proxy.scrollTo(request.targetID, anchor: request.anchor)
+                        }
+                    } else {
+                        proxy.scrollTo(request.targetID, anchor: request.anchor)
+                    }
+
+                    DispatchQueue.main.async {
+                        pendingScrollRequest = nil
+                    }
                 }
             }
         }
@@ -686,7 +713,7 @@ struct ContentView: View {
     }
 
     private func sortedImages(for category: Category) -> [ImageItem] {
-        sortedImages(category.images)
+        displayImageCache.images(for: category, order: imageSortOrder)
     }
 
     private func sortedImages(_ images: [ImageItem]) -> [ImageItem] {
@@ -966,7 +993,12 @@ struct ContentView: View {
             return displayImages.first { $0.id == searchSelectedImageID } ?? displayImages.first
         }
 
-        return library.selectedImage
+        guard let selectedImageID = library.selectedImageID else {
+            return library.selectedCategory?.images.first
+        }
+
+        return library.selectedCategory?.images.first(where: { $0.id == selectedImageID })
+            ?? library.selectedCategory?.images.first
     }
 
     private var searchResultsSummary: String {
@@ -1147,8 +1179,8 @@ struct ContentView: View {
             return event
         }
 
-        let columns = estimatedGridColumnCount
-        let pageStep = estimatedPageStep
+        let columns = gridLayoutMetrics.columns
+        let pageStep = gridLayoutMetrics.pageStep
 
         let delta: Int?
         let absoluteIndex: Int?
@@ -1180,7 +1212,21 @@ struct ContentView: View {
             absoluteIndex = nil
         }
 
-        moveSelection(delta: delta, absoluteIndex: absoluteIndex)
+        let scrollBehavior: GridScrollBehavior
+        switch navigationKey {
+        case .left, .right, .up, .down:
+            scrollBehavior = .followSelection
+        case .pageUp:
+            scrollBehavior = .jumpToEdge(.top)
+        case .pageDown:
+            scrollBehavior = .jumpToEdge(.bottom)
+        case .home:
+            scrollBehavior = .jumpToEdge(.top)
+        case .end:
+            scrollBehavior = .jumpToEdge(.bottom)
+        }
+
+        moveSelection(delta: delta, absoluteIndex: absoluteIndex, scrollBehavior: scrollBehavior)
         return nil
     }
 
@@ -1197,7 +1243,7 @@ struct ContentView: View {
         return !isSearchFieldFocused && !(hostWindow?.firstResponder is NSTextView)
     }
 
-    private func moveSelection(delta: Int?, absoluteIndex: Int?) {
+    private func moveSelection(delta: Int?, absoluteIndex: Int?, scrollBehavior: GridScrollBehavior) {
         let images = displayImages
         guard !images.isEmpty else { return }
 
@@ -1220,53 +1266,44 @@ struct ContentView: View {
         }
 
         guard images.indices.contains(targetIndex) else { return }
-        selectImage(images[targetIndex])
+        let targetImage = images[targetIndex]
+        switch scrollBehavior {
+        case .selectionOnly:
+            break
+        case .followSelection:
+            pendingScrollRequest = GridScrollRequest(targetID: targetImage.id, anchor: nil, animated: true)
+        case .jumpToEdge(let anchor):
+            pendingScrollRequest = GridScrollRequest(targetID: targetImage.id, anchor: anchor, animated: false)
+        }
+        selectImage(targetImage)
     }
 
     private var gridColumns: [GridItem] {
         Array(
-            repeating: GridItem(.flexible(minimum: thumbnailSize, maximum: thumbnailSize + 40), spacing: 16),
-            count: estimatedGridColumnCount
+            repeating: GridItem(.fixed(thumbnailSize), spacing: 16),
+            count: gridLayoutMetrics.columns
         )
     }
 
-    private var estimatedGridColumnCount: Int {
-        let availableWidth = max(gridViewportSize.width - 40, thumbnailSize)
-        let approximateCellWidth = thumbnailSize + 16
-        return max(Int((availableWidth + 16) / approximateCellWidth), 1)
-    }
-
-    private var estimatedPageStep: Int {
-        let availableHeight = max(gridViewportSize.height - 40, thumbnailSize)
-        let approximateRowHeight = thumbnailSize + 44
-        let rows = max(Int((availableHeight + 16) / approximateRowHeight), 1)
-        return max(estimatedGridColumnCount * rows, 1)
-    }
-
-    private func scrollSelectedImageIntoView(using proxy: ScrollViewProxy, animated: Bool) {
-        guard let selectedImageID = displayedSelectedImage?.id else {
-            return
-        }
-
-        let scrollAction = {
-            proxy.scrollTo(selectedImageID, anchor: .center)
-        }
-
-        if animated {
-            withAnimation(.easeInOut(duration: 0.12)) {
-                scrollAction()
-            }
-        } else {
-            scrollAction()
-        }
-    }
-
-    private func updateGridViewportSize(from size: CGSize) {
+    private func updateGridLayoutMetrics(from size: CGSize) {
         guard size != .zero else {
             return
         }
 
-        gridViewportSize = size
+        let availableWidth = max(size.width - 40, thumbnailSize)
+        let approximateCellWidth = thumbnailSize + 16
+        let columns = max(Int((availableWidth + 16) / approximateCellWidth), 1)
+
+        let availableHeight = max(size.height - 40, thumbnailSize)
+        let approximateRowHeight = thumbnailSize + 44
+        let rows = max(Int((availableHeight + 16) / approximateRowHeight), 1)
+        let metrics = GridLayoutMetrics(columns: columns, pageStep: max(columns * rows, 1))
+
+        guard metrics != gridLayoutMetrics else {
+            return
+        }
+
+        gridLayoutMetrics = metrics
     }
 
     private func navigationKey(for event: NSEvent) -> NavigationKey? {
@@ -1311,6 +1348,70 @@ private struct BrowseSelection {
     let imageID: ImageItem.ID?
 }
 
+private final class DisplayImageCache: ObservableObject {
+    private struct CacheKey: Equatable {
+        let categoryID: Category.ID
+        let sortOrder: ImageSortOrder
+        let imageCount: Int
+        let firstImageID: ImageItem.ID?
+        let lastImageID: ImageItem.ID?
+    }
+
+    private var cachedKey: CacheKey?
+    private var cachedImages: [ImageItem] = []
+
+    func images(for category: Category, order: ImageSortOrder) -> [ImageItem] {
+        let key = CacheKey(
+            categoryID: category.id,
+            sortOrder: order,
+            imageCount: category.images.count,
+            firstImageID: category.images.first?.id,
+            lastImageID: category.images.last?.id
+        )
+
+        if cachedKey == key {
+            return cachedImages
+        }
+
+        cachedKey = key
+        cachedImages = category.images.sorted { lhs, rhs in
+            let comparison = lhs.inferredTag.localizedCaseInsensitiveCompare(rhs.inferredTag)
+
+            switch order {
+            case .alphabeticalAscending:
+                if comparison == .orderedSame {
+                    return lhs.displayName.localizedCaseInsensitiveCompare(rhs.displayName) == .orderedAscending
+                }
+                return comparison == .orderedAscending
+            case .alphabeticalDescending:
+                if comparison == .orderedSame {
+                    return lhs.displayName.localizedCaseInsensitiveCompare(rhs.displayName) == .orderedDescending
+                }
+                return comparison == .orderedDescending
+            }
+        }
+
+        return cachedImages
+    }
+}
+
+private struct GridLayoutMetrics: Equatable {
+    let columns: Int
+    let pageStep: Int
+}
+
+private struct GridScrollRequest: Equatable {
+    let targetID: ImageItem.ID
+    let anchor: UnitPoint?
+    let animated: Bool
+}
+
+private enum GridScrollBehavior {
+    case selectionOnly
+    case followSelection
+    case jumpToEdge(UnitPoint)
+}
+
 private enum NavigationKey {
     case left
     case right
@@ -1337,6 +1438,7 @@ private struct SidebarNode: Identifiable, Hashable {
 private struct InspectorSplitView<Primary: View, Inspector: View>: NSViewControllerRepresentable {
     @Binding var isInspectorVisible: Bool
     @Binding var inspectorWidth: Double
+    @Binding var isInspectorResizing: Bool
     let minPrimaryWidth: CGFloat
     let minInspectorWidth: CGFloat
     let primary: Primary
@@ -1345,7 +1447,8 @@ private struct InspectorSplitView<Primary: View, Inspector: View>: NSViewControl
     func makeCoordinator() -> Coordinator {
         Coordinator(
             isInspectorVisible: $isInspectorVisible,
-            inspectorWidth: $inspectorWidth
+            inspectorWidth: $inspectorWidth,
+            isInspectorResizing: $isInspectorResizing
         )
     }
 
@@ -1370,14 +1473,17 @@ private struct InspectorSplitView<Primary: View, Inspector: View>: NSViewControl
     final class Coordinator: NSObject {
         @Binding var isInspectorVisible: Bool
         @Binding var inspectorWidth: Double
+        @Binding var isInspectorResizing: Bool
         weak var controller: SplitViewController?
 
         init(
             isInspectorVisible: Binding<Bool>,
-            inspectorWidth: Binding<Double>
+            inspectorWidth: Binding<Double>,
+            isInspectorResizing: Binding<Bool>
         ) {
             self._isInspectorVisible = isInspectorVisible
             self._inspectorWidth = inspectorWidth
+            self._isInspectorResizing = isInspectorResizing
         }
     }
 
@@ -1392,6 +1498,8 @@ private struct InspectorSplitView<Primary: View, Inspector: View>: NSViewControl
         private let minInspectorWidth: CGFloat
         private var hasAppliedInitialWidth = false
         private var pendingInspectorWidth: CGFloat?
+        private var pendingInspectorWidthSyncTask: DispatchWorkItem?
+        private var pendingResizeStateResetTask: DispatchWorkItem?
 
         init(coordinator: Coordinator, minPrimaryWidth: CGFloat, minInspectorWidth: CGFloat) {
             self.coordinator = coordinator
@@ -1456,7 +1564,8 @@ private struct InspectorSplitView<Primary: View, Inspector: View>: NSViewControl
             guard
                 isViewLoaded,
                 view.bounds.width > 0,
-                !inspectorItem.isCollapsed
+                !inspectorItem.isCollapsed,
+                !splitView.inLiveResize
             else {
                 pendingInspectorWidth = width
                 return
@@ -1482,10 +1591,40 @@ private struct InspectorSplitView<Primary: View, Inspector: View>: NSViewControl
                 return
             }
 
-            let width = max(inspectorHostingController.view.frame.width, minInspectorWidth)
-            if abs(coordinator.inspectorWidth - width) > 0.5 {
-                coordinator.inspectorWidth = width
+            if splitView.inLiveResize {
+                markInspectorResizeInProgress()
             }
+
+            let width = max(inspectorHostingController.view.frame.width, minInspectorWidth)
+            syncInspectorWidthAfterResize(width)
+        }
+
+        private func syncInspectorWidthAfterResize(_ width: CGFloat) {
+            pendingInspectorWidth = width
+            pendingInspectorWidthSyncTask?.cancel()
+
+            let syncTask = DispatchWorkItem { [weak self] in
+                guard let self, let width = self.pendingInspectorWidth else { return }
+
+                if abs(self.coordinator.inspectorWidth - width) > 0.5 {
+                    self.coordinator.inspectorWidth = width
+                }
+            }
+
+            pendingInspectorWidthSyncTask = syncTask
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.12, execute: syncTask)
+        }
+
+        private func markInspectorResizeInProgress() {
+            coordinator.isInspectorResizing = true
+            pendingResizeStateResetTask?.cancel()
+
+            let resetTask = DispatchWorkItem { [weak self] in
+                self?.coordinator.isInspectorResizing = false
+            }
+
+            pendingResizeStateResetTask = resetTask
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.12, execute: resetTask)
         }
     }
 }
@@ -1496,12 +1635,17 @@ private struct ThumbnailCell: View {
     let isSelected: Bool
     let thumbnailHeight: Double
     let isFavorite: Bool
+    let suspendThumbnailLoading: Bool
     let onToggleFavorite: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             ZStack(alignment: .topTrailing) {
-                ThumbnailImage(imageURL: image.fileURL)
+                ThumbnailImage(
+                    imageURL: image.fileURL,
+                    maximumPixelDimension: max(Int((thumbnailHeight * 2.2).rounded()), 160),
+                    isSuspended: suspendThumbnailLoading
+                )
                     .frame(height: thumbnailHeight)
                     .frame(maxWidth: .infinity)
                     .background(Color(nsColor: .windowBackgroundColor))
@@ -1658,10 +1802,13 @@ private struct NestedInspectorSection<Content: View>: View {
 
 private struct ThumbnailImage: View {
     let imageURL: URL
+    let maximumPixelDimension: Int
+    let isSuspended: Bool
+    @State private var loadResult: SafeImageLoader.LoadResult?
 
     var body: some View {
         Group {
-            switch SafeImageLoader.loadImage(for: imageURL, maximumThumbnailDimension: 768) {
+            switch loadResult {
             case .success(let nsImage):
                 Image(nsImage: nsImage)
                     .resizable()
@@ -1671,17 +1818,57 @@ private struct ThumbnailImage: View {
                 PlaceholderView(title: "", systemImage: "shield")
             case .failed:
                 PlaceholderView(title: "No Preview", systemImage: "photo")
+            case .none:
+                Color.clear
             }
+        }
+        .onAppear {
+            if loadResult == nil,
+               let cachedImage = SafeImageLoader.cachedImage(
+                for: imageURL,
+                maximumThumbnailDimension: maximumPixelDimension
+               ) {
+                loadResult = .success(cachedImage)
+            }
+        }
+        .task(id: "\(imageURL.path)#\(maximumPixelDimension)#\(isSuspended)") {
+            if isSuspended {
+                if loadResult == nil,
+                   let cachedImage = SafeImageLoader.cachedImage(
+                    for: imageURL,
+                    maximumThumbnailDimension: maximumPixelDimension
+                   ) {
+                    loadResult = .success(cachedImage)
+                }
+                return
+            }
+
+            if let cachedImage = SafeImageLoader.cachedImage(
+                for: imageURL,
+                maximumThumbnailDimension: maximumPixelDimension
+            ) {
+                loadResult = .success(cachedImage)
+                return
+            }
+
+            let result = await SafeImageLoader.loadImageAsync(
+                for: imageURL,
+                maximumThumbnailDimension: maximumPixelDimension
+            )
+            guard !Task.isCancelled else { return }
+
+            loadResult = result
         }
     }
 }
 
 private struct LargePreview: View {
     let imageURL: URL
+    @State private var loadResult: SafeImageLoader.LoadResult?
 
     var body: some View {
         Group {
-            switch SafeImageLoader.loadImage(for: imageURL, maximumThumbnailDimension: 2_048) {
+            switch loadResult {
             case .success(let nsImage):
                 Image(nsImage: nsImage)
                     .resizable()
@@ -1694,7 +1881,36 @@ private struct LargePreview: View {
             case .failed:
                 PlaceholderView(title: "No Preview", systemImage: "photo")
                     .frame(height: 260)
+            case .none:
+                Color.clear
+                    .frame(height: 260)
             }
+        }
+        .onAppear {
+            if loadResult == nil,
+               let cachedImage = SafeImageLoader.cachedImage(
+                for: imageURL,
+                maximumThumbnailDimension: 2_048
+               ) {
+                loadResult = .success(cachedImage)
+            }
+        }
+        .task(id: imageURL.path) {
+            if let cachedImage = SafeImageLoader.cachedImage(
+                for: imageURL,
+                maximumThumbnailDimension: 2_048
+            ) {
+                loadResult = .success(cachedImage)
+                return
+            }
+
+            let result = await SafeImageLoader.loadImageAsync(
+                for: imageURL,
+                maximumThumbnailDimension: 2_048
+            )
+            guard !Task.isCancelled else { return }
+
+            loadResult = result
         }
     }
 }

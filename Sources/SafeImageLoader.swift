@@ -43,8 +43,38 @@ enum SafeImageLoader {
     static let maximumFileSize = 256 * 1_024 * 1_024
     static let maximumPixelCount = 70_000_000
     private static let metadataDimensionSanityLimit = 1_000_000
+    private static let loadGate = ThumbnailLoadGate(limit: 2)
+    private static let cache: NSCache<NSString, NSImage> = {
+        let cache = NSCache<NSString, NSImage>()
+        cache.countLimit = 2_000
+        cache.totalCostLimit = 256 * 1_024 * 1_024
+        return cache
+    }()
 
-    private static let cache = NSCache<NSString, NSImage>()
+    static func loadImageAsync(
+        for fileURL: URL,
+        maximumThumbnailDimension: Int
+    ) async -> LoadResult {
+        if let cached = cachedImage(for: fileURL, maximumThumbnailDimension: maximumThumbnailDimension) {
+            return .success(cached)
+        }
+
+        do {
+            try await loadGate.acquire()
+            defer { Task { await loadGate.release() } }
+
+            try Task.checkCancellation()
+            return loadImage(for: fileURL, maximumThumbnailDimension: maximumThumbnailDimension)
+        } catch {
+            return .failed
+        }
+    }
+
+    static func cachedImage(for fileURL: URL, maximumThumbnailDimension: Int) -> NSImage? {
+        let clampedDimension = max(1, maximumThumbnailDimension)
+        let cacheKey = "\(fileURL.path)#\(clampedDimension)" as NSString
+        return cache.object(forKey: cacheKey)
+    }
 
     static func loadImage(for fileURL: URL, maximumThumbnailDimension: Int) -> LoadResult {
         let clampedDimension = max(1, maximumThumbnailDimension)
@@ -110,7 +140,30 @@ enum SafeImageLoader {
         }
 
         let image = NSImage(cgImage: thumbnail, size: .zero)
-        cache.setObject(image, forKey: cacheKey)
+        let approximateCost = thumbnail.width * thumbnail.height * 4
+        cache.setObject(image, forKey: cacheKey, cost: approximateCost)
         return .success(image)
+    }
+}
+
+private actor ThumbnailLoadGate {
+    private let limit: Int
+    private var inFlight = 0
+
+    init(limit: Int) {
+        self.limit = max(limit, 1)
+    }
+
+    func acquire() async throws {
+        while inFlight >= limit {
+            try Task.checkCancellation()
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+
+        inFlight += 1
+    }
+
+    func release() {
+        inFlight = max(inFlight - 1, 0)
     }
 }
