@@ -19,35 +19,7 @@ struct ImageItem: Identifiable, Hashable {
     let inferredTag: String
 }
 
-struct PNGInfo: Hashable {
-    let prompt: String?
-    let negativePrompt: String?
-    let generationParameters: [PNGTextEntry]
-    let textEntries: [PNGTextEntry]
-
-    var hasVisibleContent: Bool {
-        prompt?.isEmpty == false
-            || negativePrompt?.isEmpty == false
-            || !generationParameters.isEmpty
-            || !textEntries.isEmpty
-    }
-}
-
-struct FolderMetadata: Hashable {
-    let prompt: String?
-    let negativePrompt: String?
-    let generationParameters: [PNGTextEntry]
-    let textEntries: [PNGTextEntry]
-
-    var hasVisibleContent: Bool {
-        prompt?.isEmpty == false
-            || negativePrompt?.isEmpty == false
-            || !generationParameters.isEmpty
-            || !textEntries.isEmpty
-    }
-}
-
-struct InspectorMetadata: Hashable {
+struct ImageMetadata: Hashable {
     let prompt: String?
     let negativePrompt: String?
     let generationParameters: [PNGTextEntry]

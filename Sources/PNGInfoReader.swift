@@ -12,7 +12,7 @@ enum PNGInfoReader {
     private static let maximumTotalTextBytes = 8 * 1_024 * 1_024
     private static let maximumDecompressedTextLength = 1 * 1_024 * 1_024
 
-    static func read(from fileURL: URL) -> PNGInfo? {
+    static func read(from fileURL: URL) -> ImageMetadata? {
         guard fileURL.pathExtension.lowercased() == "png" else {
             return nil
         }
@@ -54,7 +54,7 @@ enum PNGInfoReader {
         let generationParameters = parsedParameters?.parameters ?? parsedComfyUI?.parameters ?? parsedDrawThings?.parameters ?? []
         let hiddenKeywords = (parsedComfyUI?.consumedKeywords ?? []).union(parsedDrawThings?.consumedKeywords ?? [])
 
-        return PNGInfo(
+        return ImageMetadata(
             prompt: prompt,
             negativePrompt: negativePrompt,
             generationParameters: generationParameters,

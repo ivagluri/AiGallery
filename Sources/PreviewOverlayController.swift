@@ -39,19 +39,6 @@ final class PreviewOverlayController: NSObject, ObservableObject, NSWindowDelega
     private var notificationObservers: [NSObjectProtocol] = []
     private var activeSession: PreviewOverlaySession?
 
-    func toggle(session: PreviewOverlaySession, from sourceWindow: NSWindow?) {
-        guard let image = session.image, let sourceWindow else {
-            dismiss()
-            return
-        }
-
-        if isPresented, activeSession?.image?.id == image.id {
-            dismiss()
-        } else {
-            show(session: session, from: sourceWindow)
-        }
-    }
-
     func present(session: PreviewOverlaySession, from sourceWindow: NSWindow?) {
         guard session.image != nil, let sourceWindow else {
             dismiss()

@@ -7,21 +7,22 @@ final class LibraryStore: ObservableObject {
     @Published var selectedCategoryID: Category.ID?
     @Published var selectedImageID: ImageItem.ID?
     @Published var errorMessage: String?
+    @Published var isLoading = false
 
     private let fileManager = FileManager.default
     private let userDefaults: UserDefaults
-    private var pngInfoCache: [String: PNGInfo?] = [:]
-    private var folderMetadataCache: [String: FolderMetadata?] = [:]
+    private var pngInfoCache: [String: ImageMetadata?] = [:]
+    private var folderMetadataCache: [String: ImageMetadata?] = [:]
     private var sourceCategories: [Category] = []
     private var searchIndex: [ImageItem] = []
     private var favoriteImageIDs: Set<String>
+    private var reloadTask: Task<Void, Never>?
     private static let rootURLDefaultsKey = "selectedRootURL"
     private static let selectedCategoryDefaultsKey = "selectedCategoryID"
     private static let favoriteImageIDsDefaultsKey = "favoriteImageIDsByRoot"
     private static let legacyFavoriteImageIDsDefaultsKey = "favoriteImageIDs"
     private static let rootCategoryID = "__root__"
-    private static let favoritesCategoryID = "__favorites__"
-    private static let favoritesGroupID = "__favorites__"
+    private static let favoritesID = "__favorites__"
 
     init(userDefaults: UserDefaults = .standard) {
         self.userDefaults = userDefaults
@@ -33,7 +34,15 @@ final class LibraryStore: ObservableObject {
         self.favoriteImageIDs = loadFavoriteImageIDs(for: self.rootURL)
 
         if defaultRootURL != nil {
-            reload()
+            // Synchronous on init so the window only appears once content is ready.
+            if let (loaded, index) = try? Self.buildLibrary(rootURL: self.rootURL) {
+                sourceCategories = loaded
+                searchIndex = index
+            }
+            pruneFavoritesToExistingImages()
+            rebuildCategories()
+            selectedCategoryID = Self.validCategoryID(current: selectedCategoryID, categories: categories)
+            selectedImageID = Self.validImageID(current: selectedImageID, categories: categories, selectedCategoryID: selectedCategoryID)
         } else {
             categories = []
             sourceCategories = []
@@ -81,44 +90,43 @@ final class LibraryStore: ObservableObject {
     }
 
     func reload() {
-        do {
-            let categoryFolders = try discoverCategoryFolders()
+        reloadTask?.cancel()
+        let capturedRootURL = rootURL
+        isLoading = true
 
-            let loadedCategories = try categoryFolders.map { folderURL in
-                let images = try self.loadImages(in: folderURL)
-                let categoryID = Self.categoryID(for: folderURL, relativeTo: rootURL)
-                let pathParts = Self.categoryPathParts(for: folderURL, relativeTo: rootURL)
+        reloadTask = Task {
+            do {
+                let (loadedCategories, loadedSearchIndex) = try await Task.detached(priority: .userInitiated) {
+                    try Self.buildLibrary(rootURL: capturedRootURL)
+                }.value
 
-                return Category(
-                    id: categoryID,
-                    name: Self.categoryName(for: pathParts),
-                    shortName: Self.subcategoryName(for: pathParts),
-                    pathParts: pathParts,
-                    rootGroupID: Self.rootGroupID(for: pathParts),
-                    rootGroupName: Self.rootGroupName(for: pathParts),
-                    folderURL: folderURL,
-                    images: images,
-                    isSynthetic: false
-                )
+                try Task.checkCancellation()
+
+                await MainActor.run {
+                    sourceCategories = loadedCategories
+                    searchIndex = loadedSearchIndex
+                    pngInfoCache.removeAll()
+                    folderMetadataCache.removeAll()
+                    pruneFavoritesToExistingImages()
+                    rebuildCategories()
+                    selectedCategoryID = Self.validCategoryID(current: selectedCategoryID, categories: categories)
+                    persistSelectedCategoryID(selectedCategoryID)
+                    selectedImageID = Self.validImageID(current: selectedImageID, categories: categories, selectedCategoryID: selectedCategoryID)
+                    errorMessage = nil
+                    isLoading = false
+                }
+            } catch is CancellationError {
+                // superseded by a newer reload — leave isLoading for the replacement task to clear
+            } catch {
+                await MainActor.run {
+                    categories = []
+                    sourceCategories = []
+                    persistSelectedCategoryID(nil)
+                    selectedImageID = nil
+                    errorMessage = error.localizedDescription
+                    isLoading = false
+                }
             }
-            .filter { !$0.images.isEmpty }
-
-            sourceCategories = loadedCategories
-            searchIndex = Self.makeSearchIndex(from: loadedCategories)
-            pngInfoCache.removeAll()
-            folderMetadataCache.removeAll()
-            pruneFavoritesToExistingImages()
-            rebuildCategories()
-            selectedCategoryID = Self.validCategoryID(current: selectedCategoryID, categories: categories)
-            persistSelectedCategoryID(selectedCategoryID)
-            selectedImageID = Self.validImageID(current: selectedImageID, categories: categories, selectedCategoryID: selectedCategoryID)
-            errorMessage = nil
-        } catch {
-            categories = []
-            sourceCategories = []
-            persistSelectedCategoryID(nil)
-            selectedImageID = nil
-            errorMessage = error.localizedDescription
         }
     }
 
@@ -150,7 +158,7 @@ final class LibraryStore: ObservableObject {
         selectedImageID = Self.validImageID(current: selectedImageID, categories: categories, selectedCategoryID: selectedCategoryID)
     }
 
-    func pngInfo(for image: ImageItem) -> PNGInfo? {
+    func pngInfo(for image: ImageItem) -> ImageMetadata? {
         if let cached = pngInfoCache[image.id] {
             return cached
         }
@@ -160,7 +168,7 @@ final class LibraryStore: ObservableObject {
         return info
     }
 
-    func inspectorMetadata(for image: ImageItem) -> InspectorMetadata? {
+    func inspectorMetadata(for image: ImageItem) -> ImageMetadata? {
         let pngInfo = pngInfo(for: image)
         let folderMetadata = folderMetadata(for: image)
 
@@ -175,7 +183,7 @@ final class LibraryStore: ObservableObject {
             fallback: folderMetadata?.textEntries ?? []
         )
 
-        let metadata = InspectorMetadata(
+        let metadata = ImageMetadata(
             prompt: prompt,
             negativePrompt: negativePrompt,
             generationParameters: generationParameters,
@@ -247,18 +255,18 @@ final class LibraryStore: ObservableObject {
         )
     }
 
-    private func loadImages(in folderURL: URL) throws -> [ImageItem] {
-        let imageURLs = try fileManager.contentsOfDirectory(
+    private static func loadImages(in folderURL: URL) throws -> [ImageItem] {
+        let imageURLs = try FileManager.default.contentsOfDirectory(
             at: folderURL,
             includingPropertiesForKeys: [.isRegularFileKey],
             options: [.skipsHiddenFiles]
         )
-        .filter(Self.isSupportedImage)
+        .filter(isSupportedImage)
         .sorted { $0.lastPathComponent.localizedCaseInsensitiveCompare($1.lastPathComponent) == .orderedAscending }
 
         return imageURLs.map { url in
             let displayName = url.deletingPathExtension().lastPathComponent
-            let inferredTag = Self.inferTag(from: displayName)
+            let inferredTag = inferTag(from: displayName)
             return ImageItem(
                 id: url.path,
                 fileURL: url,
@@ -268,7 +276,7 @@ final class LibraryStore: ObservableObject {
         }
     }
 
-    private func folderMetadata(for image: ImageItem) -> FolderMetadata? {
+    private func folderMetadata(for image: ImageItem) -> ImageMetadata? {
         let folderPath = image.fileURL.deletingLastPathComponent().path
         if let cached = folderMetadataCache[folderPath] {
             return cached
@@ -302,11 +310,11 @@ final class LibraryStore: ObservableObject {
         }
 
         let favoritesCategory = Category(
-            id: Self.favoritesCategoryID,
+            id: Self.favoritesID,
             name: "Favorites",
             shortName: "Saved Images",
             pathParts: ["Favorites"],
-            rootGroupID: Self.favoritesGroupID,
+            rootGroupID: Self.favoritesID,
             rootGroupName: "Favorites",
             folderURL: rootURL,
             images: favoriteImages,
@@ -365,34 +373,53 @@ final class LibraryStore: ObservableObject {
         return legacyFavoriteImageIDs
     }
 
-    private func discoverCategoryFolders() throws -> [URL] {
-        var categoryFolders: [URL] = []
+    private static func discoverCategoryFolders(rootURL: URL) throws -> [(folderURL: URL, images: [ImageItem])] {
+        var result: [(folderURL: URL, images: [ImageItem])] = []
 
-        if !(try loadImages(in: rootURL)).isEmpty {
-            categoryFolders.append(rootURL)
+        let rootImages = try loadImages(in: rootURL)
+        if !rootImages.isEmpty {
+            result.append((rootURL, rootImages))
         }
 
-        guard let enumerator = fileManager.enumerator(
+        guard let enumerator = FileManager.default.enumerator(
             at: rootURL,
             includingPropertiesForKeys: [.isDirectoryKey, .isRegularFileKey],
             options: [.skipsHiddenFiles]
         ) else {
-            return categoryFolders
+            return result
         }
 
         for case let url as URL in enumerator {
-            guard Self.isDirectory(url) else { continue }
-
+            guard isDirectory(url) else { continue }
             let images = try loadImages(in: url)
             if !images.isEmpty {
-                categoryFolders.append(url)
+                result.append((url, images))
             }
         }
 
-        return categoryFolders.sorted {
-            Self.categorySortKey(for: $0, relativeTo: rootURL)
-                .localizedCaseInsensitiveCompare(Self.categorySortKey(for: $1, relativeTo: rootURL)) == .orderedAscending
+        return result.sorted {
+            categorySortKey(for: $0.folderURL, relativeTo: rootURL)
+                .localizedCaseInsensitiveCompare(categorySortKey(for: $1.folderURL, relativeTo: rootURL)) == .orderedAscending
         }
+    }
+
+    private static func buildLibrary(rootURL: URL) throws -> (categories: [Category], searchIndex: [ImageItem]) {
+        let folders = try discoverCategoryFolders(rootURL: rootURL)
+        let loadedCategories = folders.map { folderURL, images in
+            let pathParts = categoryPathParts(for: folderURL, relativeTo: rootURL)
+            return Category(
+                id: categoryID(for: folderURL, relativeTo: rootURL),
+                name: categoryName(for: pathParts),
+                shortName: subcategoryName(for: pathParts),
+                pathParts: pathParts,
+                rootGroupID: rootGroupID(for: pathParts),
+                rootGroupName: rootGroupName(for: pathParts),
+                folderURL: folderURL,
+                images: images,
+                isSynthetic: false
+            )
+        }
+        return (loadedCategories, makeSearchIndex(from: loadedCategories))
     }
 
     private static func isDirectory(_ url: URL) -> Bool {

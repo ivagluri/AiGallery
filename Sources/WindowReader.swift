@@ -122,9 +122,3 @@ final class KeyHandlingView: NSView {
         super.keyUp(with: event)
     }
 }
-
-private final class PassthroughHelperView: NSView {
-    override func hitTest(_ point: NSPoint) -> NSView? {
-        nil
-    }
-}

@@ -30,6 +30,7 @@ struct ContentView: View {
     @State private var gridLayoutMetrics = GridLayoutMetrics(columns: 1, pageStep: 1)
     @State private var pendingScrollRequest: GridScrollRequest?
     @State private var isInspectorResizing = false
+    @State private var scrollEndNonce = false
 
     var body: some View {
         NavigationSplitView {
@@ -172,7 +173,10 @@ struct ContentView: View {
             }
         }
         .overlay {
-            if library.categories.isEmpty {
+            if library.isLoading {
+                ProgressView()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if library.categories.isEmpty {
                 PlaceholderView(title: "No Categories", systemImage: "folder")
             }
         }
@@ -358,6 +362,9 @@ struct ContentView: View {
                     systemImage: "exclamationmark.triangle",
                     description: errorMessage
                 )
+            } else if library.isLoading {
+                ProgressView()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 PlaceholderView(title: "Choose a Category", systemImage: "photo.on.rectangle")
             }
@@ -656,11 +663,14 @@ struct ContentView: View {
                         updateGridLayoutMetrics(from: geometry.size)
                     }
                 }
+                .onReceive(NotificationCenter.default.publisher(for: NSScrollView.didEndLiveScrollNotification)) { _ in
+                    scrollEndNonce.toggle()
+                }
                 .onChange(of: pendingScrollRequest) { request in
                     guard let request else { return }
 
                     if request.animated {
-                        withAnimation(.easeInOut(duration: 0.12)) {
+                        withAnimation(.easeInOut(duration: 0.24)) {
                             proxy.scrollTo(request.targetID, anchor: request.anchor)
                         }
                     } else {
@@ -734,25 +744,6 @@ struct ContentView: View {
 
     private func sortedImages(for category: Category) -> [ImageItem] {
         displayImageCache.images(for: category, order: imageSortOrder)
-    }
-
-    private func sortedImages(_ images: [ImageItem]) -> [ImageItem] {
-        images.sorted { lhs, rhs in
-            let comparison = lhs.inferredTag.localizedCaseInsensitiveCompare(rhs.inferredTag)
-
-            switch imageSortOrder {
-            case .alphabeticalAscending:
-                if comparison == .orderedSame {
-                    return lhs.displayName.localizedCaseInsensitiveCompare(rhs.displayName) == .orderedAscending
-                }
-                return comparison == .orderedAscending
-            case .alphabeticalDescending:
-                if comparison == .orderedSame {
-                    return lhs.displayName.localizedCaseInsensitiveCompare(rhs.displayName) == .orderedDescending
-                }
-                return comparison == .orderedDescending
-            }
-        }
     }
 
     private func humanReadablePNGLabel(for keyword: String) -> String {
@@ -1758,11 +1749,13 @@ private struct InspectorSplitView<Primary: View, Inspector: View>: NSViewControl
             }
 
             pendingInspectorWidthSyncTask = syncTask
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.12, execute: syncTask)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.24, execute: syncTask)
         }
 
         private func markInspectorResizeInProgress() {
-            coordinator.isInspectorResizing = true
+            if !coordinator.isInspectorResizing {
+                coordinator.isInspectorResizing = true
+            }
             pendingResizeStateResetTask?.cancel()
 
             let resetTask = DispatchWorkItem { [weak self] in
@@ -1770,7 +1763,7 @@ private struct InspectorSplitView<Primary: View, Inspector: View>: NSViewControl
             }
 
             pendingResizeStateResetTask = resetTask
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.12, execute: resetTask)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.24, execute: resetTask)
         }
     }
 }
@@ -1842,7 +1835,7 @@ private struct ThumbnailCell: View {
 
     private var cardFillColor: Color {
         if isSelected {
-            return Color.accentColor.opacity(colorScheme == .dark ? 0.14 : 0.12)
+            return Color.accentColor.opacity(colorScheme == .dark ? 0.14 : 0.24)
         }
 
         return Color(
@@ -2072,7 +2065,7 @@ private struct LargePreview: View {
     }
 }
 
-private struct PlaceholderView: View {
+struct PlaceholderView: View {
     let title: String
     let systemImage: String
     var description: String?

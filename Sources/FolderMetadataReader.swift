@@ -9,7 +9,7 @@ enum FolderMetadataReader {
         "metadata.cfg"
     ]
 
-    static func read(from folderURL: URL) -> FolderMetadata? {
+    static func read(from folderURL: URL) -> ImageMetadata? {
         let fileManager = FileManager.default
 
         for fileName in supportedFileNames {
@@ -35,7 +35,7 @@ enum FolderMetadataReader {
         return nil
     }
 
-    private static func readJSON(from fileURL: URL) -> FolderMetadata? {
+    private static func readJSON(from fileURL: URL) -> ImageMetadata? {
         guard
             let fileSize = (try? fileURL.resourceValues(forKeys: [.fileSizeKey]))?.fileSize,
             fileSize > 0,
@@ -60,7 +60,7 @@ enum FolderMetadataReader {
 
         let fallbackEntries = fallbackEntriesFromDictionary(dictionary)
         let mergedTextEntries = deduplicate(textEntries + fallbackEntries)
-        let metadata = FolderMetadata(
+        let metadata = ImageMetadata(
             prompt: prompt,
             negativePrompt: negativePrompt,
             generationParameters: deduplicate(generationParameters),
@@ -70,7 +70,7 @@ enum FolderMetadataReader {
         return metadata.hasVisibleContent ? metadata : nil
     }
 
-    private static func readCFG(from fileURL: URL) -> FolderMetadata? {
+    private static func readCFG(from fileURL: URL) -> ImageMetadata? {
         guard
             let fileSize = (try? fileURL.resourceValues(forKeys: [.fileSizeKey]))?.fileSize,
             fileSize > 0,
@@ -137,7 +137,7 @@ enum FolderMetadataReader {
             }
         }
 
-        let metadata = FolderMetadata(
+        let metadata = ImageMetadata(
             prompt: prompt?.nilIfEmpty,
             negativePrompt: negativePrompt?.nilIfEmpty,
             generationParameters: deduplicate(generationParameters),

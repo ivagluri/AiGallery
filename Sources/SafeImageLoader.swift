@@ -12,14 +12,7 @@ enum SafeImageLoader {
         case fileTooLarge
         case imageTooLarge
 
-        var title: String {
-            switch self {
-            case .fileTooLarge:
-                return "Preview Blocked"
-            case .imageTooLarge:
-                return "Preview Blocked"
-            }
-        }
+        var title: String { "Preview Blocked" }
 
         var message: String {
             switch self {
@@ -43,7 +36,7 @@ enum SafeImageLoader {
     static let maximumFileSize = 256 * 1_024 * 1_024
     static let maximumPixelCount = 70_000_000
     private static let metadataDimensionSanityLimit = 1_000_000
-    private static let loadGate = ThumbnailLoadGate(limit: 2)
+    private static let loadGate = ThumbnailLoadGate(limit: 4)
     private static let cache: NSCache<NSString, NSImage> = {
         let cache = NSCache<NSString, NSImage>()
         cache.countLimit = 2_000
@@ -116,36 +109,25 @@ enum SafeImageLoader {
             return .blocked(.fileTooLarge)
         }
 
+        let sourceOptions = [kCGImageSourceShouldCache: false] as CFDictionary
+        guard let source = CGImageSourceCreateWithURL(fileURL as CFURL, sourceOptions) else {
+            return .failed
+        }
+
         guard
-            let source = CGImageSourceCreateWithURL(fileURL as CFURL, [
-                kCGImageSourceShouldCache: false
-            ] as CFDictionary),
-            let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, [
-                kCGImageSourceShouldCache: false
-            ] as CFDictionary) as? [CFString: Any],
+            let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, sourceOptions) as? [CFString: Any],
             let pixelWidth = properties[kCGImagePropertyPixelWidth] as? Int,
             let pixelHeight = properties[kCGImagePropertyPixelHeight] as? Int,
             pixelWidth > 0,
             pixelHeight > 0,
             pixelWidth <= metadataDimensionSanityLimit,
-            pixelHeight <= metadataDimensionSanityLimit,
-            pixelWidth <= maximumPixelCount / pixelHeight
+            pixelHeight <= metadataDimensionSanityLimit
         else {
-            if let source = CGImageSourceCreateWithURL(fileURL as CFURL, [
-                kCGImageSourceShouldCache: false
-            ] as CFDictionary),
-               let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, [
-                kCGImageSourceShouldCache: false
-               ] as CFDictionary) as? [CFString: Any],
-               let pixelWidth = properties[kCGImagePropertyPixelWidth] as? Int,
-               let pixelHeight = properties[kCGImagePropertyPixelHeight] as? Int,
-               pixelWidth > 0,
-               pixelHeight > 0
-            {
-                return .blocked(.imageTooLarge)
-            }
-
             return .failed
+        }
+
+        guard pixelWidth <= maximumPixelCount / pixelHeight else {
+            return .blocked(.imageTooLarge)
         }
 
         let options: [CFString: Any] = [
@@ -170,21 +152,43 @@ enum SafeImageLoader {
 private actor ThumbnailLoadGate {
     private let limit: Int
     private var inFlight = 0
+    private var waiters: [(id: UUID, continuation: CheckedContinuation<Void, Error>)] = []
 
     init(limit: Int) {
         self.limit = max(limit, 1)
     }
 
     func acquire() async throws {
-        while inFlight >= limit {
-            try Task.checkCancellation()
-            try await Task.sleep(nanoseconds: 10_000_000)
+        try Task.checkCancellation()
+
+        guard inFlight >= limit else {
+            inFlight += 1
+            return
         }
 
-        inFlight += 1
+        let id = UUID()
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                waiters.append((id: id, continuation: continuation))
+            }
+        } onCancel: {
+            Task { await self.cancelWaiter(id: id) }
+        }
+        // Slot was transferred by release() — no increment needed.
     }
 
     func release() {
-        inFlight = max(inFlight - 1, 0)
+        if let next = waiters.first {
+            waiters.removeFirst()
+            next.continuation.resume()
+            // inFlight unchanged: slot passes directly to the next waiter.
+        } else {
+            inFlight = max(inFlight - 1, 0)
+        }
+    }
+
+    private func cancelWaiter(id: UUID) {
+        guard let index = waiters.firstIndex(where: { $0.id == id }) else { return }
+        waiters.remove(at: index).continuation.resume(throwing: CancellationError())
     }
 }
