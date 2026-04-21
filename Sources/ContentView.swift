@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct ContentView: View {
     private static let topLevelFolderTitle = "This Folder"
@@ -31,6 +32,8 @@ struct ContentView: View {
     @State private var pendingScrollRequest: GridScrollRequest?
     @State private var isInspectorResizing = false
     @State private var scrollEndNonce = false
+    @State private var droppedInspectionImage: ImageItem?
+    @State private var isDropTargeted = false
 
     var body: some View {
         NavigationSplitView {
@@ -81,6 +84,7 @@ struct ContentView: View {
             expandAllGroupsIfNeeded()
         }
         .onChange(of: library.rootURL) { _ in
+            clearDroppedInspection()
             clearSearchForRootChange()
         }
         .onChange(of: searchText) { newValue in
@@ -99,6 +103,12 @@ struct ContentView: View {
                 handleKeyEvent(event)
             }
         )
+        .overlay {
+            if isDropTargeted {
+                dropTargetOverlay
+            }
+        }
+        .onDrop(of: [UTType.fileURL.identifier], isTargeted: $isDropTargeted, perform: handleDroppedFileProviders)
         .onDisappear {
             previewController.dismiss()
         }
@@ -302,6 +312,7 @@ struct ContentView: View {
         Button {
             guard !isSearching else { return }
             relinquishSearchFocus()
+            clearDroppedInspection()
             library.selectCategory(category)
         } label: {
             HStack {
@@ -377,14 +388,23 @@ struct ContentView: View {
                 let metadata = library.inspectorMetadata(for: image)
 
                 VStack(alignment: .leading, spacing: 16) {
+                    if isInspectingDroppedImage {
+                        temporaryInspectionBanner
+                    }
+
                     LargePreview(imageURL: image.fileURL)
                         .frame(maxWidth: .infinity)
                         .overlay(alignment: .topTrailing) {
-                            previewFavoriteButton(for: image)
-                                .padding(12)
+                            if !isInspectingDroppedImage {
+                                previewFavoriteButton(for: image)
+                                    .padding(12)
+                            }
                         }
 
                     InspectorSection("Image", isExpanded: $isImageInfoExpanded) {
+                        if isInspectingDroppedImage {
+                            inspectorRow("Source", "Dropped PNG (temporary)")
+                        }
                         inspectorTagRow("Tag", image.inferredTag)
                         inspectorRow("Filename", image.fileURL.lastPathComponent)
                         inspectorRow("Path", image.fileURL.path)
@@ -983,6 +1003,10 @@ struct ContentView: View {
         activeSearchText.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    private var isInspectingDroppedImage: Bool {
+        droppedInspectionImage != nil
+    }
+
     private var isSearching: Bool {
         !trimmedActiveSearchText.isEmpty
     }
@@ -1000,6 +1024,10 @@ struct ContentView: View {
     }
 
     private var displayedSelectedImage: ImageItem? {
+        if let droppedInspectionImage {
+            return droppedInspectionImage
+        }
+
         if isSearching {
             return displayImages.first { $0.id == searchSelectedImageID } ?? displayImages.first
         }
@@ -1034,6 +1062,10 @@ struct ContentView: View {
     }
 
     private func handleSearchTextChange(_ newValue: String) {
+        if droppedInspectionImage != nil {
+            clearDroppedInspection()
+        }
+
         let trimmedValue = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
         let wasSearching = !trimmedActiveSearchText.isEmpty
         let isActivatingSearch = !trimmedValue.isEmpty && !wasSearching && savedBrowseSelection == nil
@@ -1117,6 +1149,7 @@ struct ContentView: View {
 
     private func selectImage(_ image: ImageItem) {
         relinquishSearchFocus()
+        clearDroppedInspection()
 
         if isSearching {
             searchSelectedImageID = image.id
@@ -1259,7 +1292,7 @@ struct ContentView: View {
     }
 
     private func shouldHandleFavoriteHotkey(_ event: NSEvent) -> Bool {
-        guard displayedSelectedImage != nil else {
+        guard displayedSelectedImage != nil, !isInspectingDroppedImage else {
             return false
         }
 
@@ -1423,28 +1456,29 @@ struct ContentView: View {
     }
 
     private func previewOverlaySession() -> PreviewOverlaySession {
+        let isDroppedInspection = isInspectingDroppedImage
         let images = displayImages
         let currentID = displayedSelectedImage?.id
         let currentIndex = currentID.flatMap { id in
             images.firstIndex { $0.id == id }
         }
-        let hasPrevious = (currentIndex ?? 0) > 0
-        let hasNext = (currentIndex ?? -1) >= 0 && (currentIndex ?? -1) < images.count - 1
+        let hasPrevious = !isDroppedInspection && (currentIndex ?? 0) > 0
+        let hasNext = !isDroppedInspection && (currentIndex ?? -1) >= 0 && (currentIndex ?? -1) < images.count - 1
 
         return PreviewOverlaySession(
             image: displayedSelectedImage,
             capabilities: PreviewOverlayCapabilities(
-                supportsNavigation: true,
-                supportsFavorite: true,
+                supportsNavigation: !isDroppedInspection,
+                supportsFavorite: !isDroppedInspection,
                 supportsMetadata: false
             ),
-            isFavorite: displayedSelectedImage.map { library.isFavorite($0) } ?? false,
+            isFavorite: !isDroppedInspection && (displayedSelectedImage.map { library.isFavorite($0) } ?? false),
             canNavigatePrevious: hasPrevious,
             canNavigateNext: hasNext,
-            onNavigate: { action in
+            onNavigate: isDroppedInspection ? nil : { action in
                 handlePreviewNavigation(action)
             },
-            onToggleFavorite: {
+            onToggleFavorite: isDroppedInspection ? nil : {
                 guard let image = displayedSelectedImage else { return }
                 library.toggleFavorite(image)
                 syncPreviewSession()
@@ -1472,6 +1506,134 @@ struct ContentView: View {
             moveSelection(delta: nil, absoluteIndex: 0, scrollBehavior: scrollBehavior)
         case .end:
             moveSelection(delta: nil, absoluteIndex: max(displayImages.count - 1, 0), scrollBehavior: scrollBehavior)
+        }
+    }
+
+    private var temporaryInspectionBanner: some View {
+        HStack(spacing: 12) {
+            Label("Temporary PNG inspection", systemImage: "photo.badge.arrow.down")
+                .font(.subheadline.weight(.semibold))
+
+            Spacer(minLength: 12)
+
+            Button("Return to Library") {
+                clearDroppedInspection()
+            }
+            .buttonStyle(.borderless)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(Color.accentColor.opacity(colorScheme == .dark ? 0.14 : 0.10))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(Color.accentColor.opacity(colorScheme == .dark ? 0.28 : 0.18), lineWidth: 1)
+        )
+    }
+
+    private var dropTargetOverlay: some View {
+        ZStack {
+            Color.black.opacity(colorScheme == .dark ? 0.20 : 0.12)
+                .ignoresSafeArea()
+
+            Rectangle()
+                .strokeBorder(
+                    Color.accentColor.opacity(colorScheme == .dark ? 0.90 : 0.75),
+                    lineWidth: 3
+                )
+                .ignoresSafeArea()
+
+            VStack(spacing: 10) {
+                Image(systemName: "photo.badge.arrow.down")
+                    .font(.system(size: 28, weight: .semibold))
+                    .foregroundStyle(Color.white)
+
+                Text("Drop a PNG to inspect it temporarily")
+                    .font(.headline)
+                    .foregroundStyle(Color.white)
+
+                Text("The file opens in the existing inspector and preview flow without being added to the library.")
+                    .font(.subheadline)
+                    .foregroundStyle(Color.white.opacity(0.88))
+                    .multilineTextAlignment(.center)
+            }
+            .padding(.horizontal, 22)
+            .padding(.vertical, 18)
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(Color.white.opacity(colorScheme == .dark ? 0.22 : 0.35), lineWidth: 1)
+            )
+            .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.35 : 0.18), radius: 18, y: 8)
+            .padding(24)
+        }
+        .allowsHitTesting(false)
+    }
+
+    private func handleDroppedFileProviders(_ providers: [NSItemProvider]) -> Bool {
+        let fileProviders = providers.filter { provider in
+            provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier)
+        }
+
+        guard !fileProviders.isEmpty else {
+            return false
+        }
+
+        loadFirstDroppedPNG(from: fileProviders, at: 0)
+        return true
+    }
+
+    private func loadFirstDroppedPNG(from providers: [NSItemProvider], at index: Int) {
+        guard providers.indices.contains(index) else {
+            return
+        }
+
+        providers[index].loadDataRepresentation(forTypeIdentifier: UTType.fileURL.identifier) { data, _ in
+            guard let data else {
+                loadFirstDroppedPNG(from: providers, at: index + 1)
+                return
+            }
+
+            guard let fileURL = URL(dataRepresentation: data, relativeTo: nil) else {
+                loadFirstDroppedPNG(from: providers, at: index + 1)
+                return
+            }
+
+            Task { @MainActor in
+                if !openDroppedInspection(for: fileURL) {
+                    loadFirstDroppedPNG(from: providers, at: index + 1)
+                }
+            }
+        }
+    }
+
+    @MainActor
+    private func openDroppedInspection(for fileURL: URL) -> Bool {
+        guard let image = library.temporaryInspectionImage(for: fileURL) else {
+            return false
+        }
+
+        relinquishSearchFocus()
+        showInspector = true
+        droppedInspectionImage = image
+
+        if previewController.isPresented {
+            syncPreviewSession()
+        }
+
+        return true
+    }
+
+    private func clearDroppedInspection() {
+        guard droppedInspectionImage != nil else {
+            return
+        }
+
+        droppedInspectionImage = nil
+        if previewController.isPresented {
+            syncPreviewSession()
         }
     }
 

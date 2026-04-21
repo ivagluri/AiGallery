@@ -193,6 +193,14 @@ final class LibraryStore: ObservableObject {
         return metadata.hasVisibleContent ? metadata : nil
     }
 
+    func temporaryInspectionImage(for fileURL: URL) -> ImageItem? {
+        guard fileURL.pathExtension.lowercased() == "png", Self.isSupportedImage(fileURL) else {
+            return nil
+        }
+
+        return Self.makeImageItem(from: fileURL)
+    }
+
     func chooseRootFolder() {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
@@ -264,16 +272,7 @@ final class LibraryStore: ObservableObject {
         .filter(isSupportedImage)
         .sorted { $0.lastPathComponent.localizedCaseInsensitiveCompare($1.lastPathComponent) == .orderedAscending }
 
-        return imageURLs.map { url in
-            let displayName = url.deletingPathExtension().lastPathComponent
-            let inferredTag = inferTag(from: displayName)
-            return ImageItem(
-                id: url.path,
-                fileURL: url,
-                displayName: displayName,
-                inferredTag: inferredTag
-            )
-        }
+        return imageURLs.map(makeImageItem)
     }
 
     private func folderMetadata(for image: ImageItem) -> ImageMetadata? {
@@ -429,6 +428,18 @@ final class LibraryStore: ObservableObject {
     private static func isSupportedImage(_ url: URL) -> Bool {
         let supportedExtensions = ["png", "jpg", "jpeg", "webp"]
         return supportedExtensions.contains(url.pathExtension.lowercased())
+    }
+
+    private static func makeImageItem(from url: URL) -> ImageItem {
+        let displayName = url.deletingPathExtension().lastPathComponent
+        let inferredTag = inferTag(from: displayName)
+
+        return ImageItem(
+            id: url.path,
+            fileURL: url,
+            displayName: displayName,
+            inferredTag: inferredTag
+        )
     }
 
     private static func makeSearchIndex(from categories: [Category]) -> [ImageItem] {
