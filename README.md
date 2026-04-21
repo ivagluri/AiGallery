@@ -7,7 +7,7 @@ It started out as a way to browse TagExplorer.github.io-style sample folders, bu
 
 Replace this with a current screenshot after the UI refresh.
 
-![AiGallery screenshot](screenshot.png)
+![AiGallery screenshot](screenshot2.png)
 
 ## What It Does
 
