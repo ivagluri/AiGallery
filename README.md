@@ -1,70 +1,72 @@
 # AiGallery
-AiGallery is a lightweight native macOS app for browsing AI-generated images from local folders with pnginfo support.
-Initially inspired by tag gallery websites like "tagexplorer.github.io", to have a native macos app for quick browsing of large sample sets of outputs.
+AiGallery is a native macOS image browser for local AI image folders, with built-in PNG info reading and simple folder-based browsing.
+
+It started out as a way to browse TagExplorer.github.io-style sample folders, but the goal now is broader and simpler: point it at a folder of images on your Mac and browse them like a lightweight local gallery with metadata.
 
 ## Screenshot
+
+Replace this with a current screenshot after the UI refresh.
 
 ![AiGallery screenshot](screenshot.png)
 
 ## What It Does
-AiGallery scans a root folder, treats subfolders as categories, and shows the images in a three-pane browser:
 
-- A sidebar with folder-driven categories
-- A central grid of image thumbnails
-- An inspector with image details and generation metadata from PNG info or folder-level config files
+- Scans a root folder and builds the sidebar from the folders it finds
+- Shows thumbnails in a fast scrollable grid
+- Reads embedded PNG info when present
+- Falls back to folder-level metadata files for formats that do not carry PNG info well
+- Lets you inspect a single dropped PNG without adding it to the library
+- Keeps everything local and offline
 
-## Why It Exists
+## What Changed In This Branch
 
-I wanted an offline, native alternative to the web-based tag galleries for faster and better handling of large amounts of images.  
-- Works offline
-- Keeps image libraries private on your machine
-- Feels more like a native file browser than a website
-- Can use unique or own generated images to easily build out a custom tag/example gallery.
-- simpler way to navigate tag hierarchies and see PNGinfo vs just using finder.
+This branch is the point where AiGallery stops treating the TagExplorer `gens` folder structure as the main way to use the app.
+
+The aim now is:
+
+- make AiGallery useful as a general local PNG info viewer and image browser
+- treat normal folders as normal folders by default
+- keep TagExplorer compatibility as an optional legacy mode
+- simplify the inspector so it feels more like file info plus PNG info, not a tag browser
+
+## What Changed Since 0.1.9
+
+- General browsing is now the default direction of the app instead of the TagExplorer layout being the center of the design
+- TagExplorer handling was moved behind a legacy mode toggle instead of being assumed everywhere
+- The inspector was reworked into a simpler single info module
+- The app now has a first-run welcome flow with a plain folder-open path and an optional legacy mode foldout
+- Legacy TagExplorer-derived assets and support files were removed from this branch so the project is cleaner to work on
 
 ## Folder Layout
 
-AiGallery builds it's category browser based on folder heirarchy, with a simple recursive structure.
-Each subfolder inside the selected root is treated as a category. Images inside those folders are shown in the browser, and further subfolders are subcategories.
+AiGallery now works best when you point it at a normal folder tree of images.
+
+Each folder with images becomes a category. Nested folders become nested categories in the sidebar.
 
 ```text
 Root Folder/
-├─ Category 1/
-│  ├─ Subcategory 1/
-│  ├─ Subcategory 2/
-│  │  └─ Sub-Subcategory 1/
-└─ Category 2/
+├─ Artists/
+│  ├─ Illustrious/
+│  └─ Realistic/
+├─ Lighting/
+│  └─ Golden Hour/
+└─ Poses/
+   ├─ Arms/
+   └─ Standing/
 ```
 
-The category naming was originally shaped around the folder layout used in the TagExplorer repository, and that scheme for its folders is supported as well, using " - " as the subcategory divider.
-The app supports common image types including:
+Supported image formats:
 
 - `png`
 - `jpg`
 - `jpeg`
 - `webp`
 
-## Tags
+## PNG Info And Folder Metadata
 
-For custom libraries, each image should generally represent a single tag or concept.
-The app uses the filename as the displayed tag label, replacing underscores with spaces.  
-Files MUST have simple tag representative filenames for the concept to work properly, as the interface and search pull this information from the filename at present.  longer or different filenames won't prevent images from loading or the gallery from building, but will pollute the tag search feature with whatever the filenames contain.
+AiGallery reads embedded PNG text metadata when it exists.
 
-```text
-Artists/
-    Illustrious/
-        artist1.png
-        artist2.png
-Poses/
-    arms/
-        one_arm_up.png
-        crossed_arms.png
-```
-
-
-## Folder Metadata Files
-
-For formats that do not carry PNG-style embedded metadata well, such as large `.webp` sample sets, you can drop a simple metadata file into a category folder. AiGallery will use it as a fallback for every image in that folder.
+If a folder contains images that do not carry good embedded metadata, you can also add a folder-level metadata file and AiGallery will use it as fallback info for images in that folder.
 
 Supported filenames:
 
@@ -105,18 +107,27 @@ Batch=iteration 04
 Source=Inspiration Gens
 ```
 
-Embedded PNG metadata still takes priority, but folder metadata fills in the inspector when an image has no readable PNG info.
+Embedded PNG metadata still takes priority when present.
 
-## How To Use It
+## Using It
 
-You can use AiGallery in two main ways:
+On first launch, AiGallery opens a welcome panel.
 
-1. Point it at your own folder of AI-generated images, arranged in the folder and filename structure described above.
-2. Use the existing `gens` folder from the https://github.com/tagexplorer/tagexplorer.github.io repo, which is how the app was originally developed and tested, and supports that specific folder structure.
+- If you just want to browse your own folders, click `Open Image Folder`
+- If you want old TagExplorer compatibility, open the `Legacy Mode` foldout and enable it first
 
-When the app launches, it will try to use a local `gens` folder if one exists, and checks for `gens` in the same folder as the app. If no `gens` folder is found, the app starts empty and you can click `Choose Folder…` at any time to select a library.
+After that, you can change folders from the app and switch legacy mode from the menu.
 
-- The app bundle is unsigned. On most Macs, Gatekeeper will likely not let you open it just by double click.  macOS Sonoma removed the keyboard shortcut to bypass this so you now are forced to approve it in system settings>privacy.  Or the command line xattr method  still works.
+## Legacy Mode
+
+Legacy mode is still here for people who want to use the large [TagExplorer.github.io](https://github.com/tagexplorer/tagexplorer.github.io) `gens` tag gallery folder setup.
+
+When legacy mode is enabled:
+
+- AiGallery can interpret the old TagExplorer-style category naming more cleanly
+- the app can still work with a local `gens` folder if you want that workflow
+
+If you do not need that, you can ignore legacy mode completely and just use your own folders.
 
 ## Build
 
@@ -126,7 +137,14 @@ From the project root:
 swift build
 ```
 
-## Disclaimer
-This project was built with the help of AI coding tools, primarily Codex.
-I am not a professional developer, so this repository is a vibe coded personal solution, but someone else might find it useful too.
-If you decide to use it, expect there may be bugs, rough edges, or missing features.
+To build the app bundle:
+
+```bash
+./scripts/build-app.sh
+```
+
+## Notes
+
+- The app bundle is unsigned, so macOS may block it until you allow it in system settings or clear the quarantine flag manually
+- This is still a small personal project and it will probably keep changing
+- If you want the exact implementation details, the code is simple enough to read without too much digging
