@@ -15,10 +15,10 @@ struct ContentView: View {
     @State private var searchText = ""
     @State private var activeSearchText = ""
     @State private var expandedGroupIDs: Set<String> = []
-    @State private var isImageInfoExpanded = true
-    @State private var isPNGInfoExpanded = true
-    @State private var isPNGPromptsExpanded = true
-    @State private var isPNGDetailsExpanded = true
+    @State private var isPathExpanded = false
+    @State private var isInfoExpanded = true
+    @State private var isPositivePromptExpanded = true
+    @State private var isNegativePromptExpanded = true
     @State private var copiedInspectorValue: String?
     @State private var copiedInspectorResetTask: DispatchWorkItem?
     @State private var savedBrowseSelection: BrowseSelection?
@@ -131,7 +131,7 @@ struct ContentView: View {
             Image(systemName: "magnifyingglass")
                 .foregroundStyle(.secondary)
 
-            TextField("Search Tags", text: $searchText)
+            TextField("Search", text: $searchText)
                 .textFieldStyle(.plain)
                 .focused($isSearchFieldFocused)
 
@@ -386,11 +386,28 @@ struct ContentView: View {
         ScrollView {
             if let image = displayedSelectedImage {
                 let metadata = library.inspectorMetadata(for: image)
+                let hasPrompts = (metadata?.prompt?.isEmpty == false) || (metadata?.negativePrompt?.isEmpty == false)
+                let additionalMetadataEntries = metadata.map { metadata in
+                    metadata.textEntries.filter { entry in
+                        shouldDisplayMetadataEntry(
+                            entry,
+                            hasStructuredMetadata: metadata.prompt != nil
+                                || metadata.negativePrompt != nil
+                                || !metadata.generationParameters.isEmpty
+                        )
+                    }
+                } ?? []
+                let hasInfoContent = isInspectingDroppedImage
+                    || hasPrompts
+                    || !(metadata?.generationParameters.isEmpty ?? true)
+                    || !additionalMetadataEntries.isEmpty
 
                 VStack(alignment: .leading, spacing: 16) {
                     if isInspectingDroppedImage {
                         temporaryInspectionBanner
                     }
+
+                    pathDisclosure(for: image)
 
                     LargePreview(imageURL: image.fileURL)
                         .frame(maxWidth: .infinity)
@@ -401,47 +418,26 @@ struct ContentView: View {
                             }
                         }
 
-                    InspectorSection("Image", isExpanded: $isImageInfoExpanded) {
-                        if isInspectingDroppedImage {
-                            inspectorRow("Source", "Dropped PNG (temporary)")
-                        }
-                        inspectorTagRow("Tag", image.displayLabel)
-                        inspectorRow("Filename", image.fileURL.lastPathComponent)
-                        inspectorRow("Path", image.fileURL.path)
-                    }
-
-                    if let metadata, metadata.hasVisibleContent {
-                        let additionalMetadataEntries = metadata.textEntries.filter { entry in
-                            shouldDisplayMetadataEntry(
-                                entry,
-                                hasStructuredMetadata: metadata.prompt != nil
-                                    || metadata.negativePrompt != nil
-                                    || !metadata.generationParameters.isEmpty
-                            )
-                        }
-
-                        InspectorSection("Metadata", isExpanded: $isPNGInfoExpanded) {
-                            if metadata.prompt != nil || metadata.negativePrompt != nil {
-                                NestedInspectorSection("Prompts", isExpanded: $isPNGPromptsExpanded) {
-                                    if let prompt = metadata.prompt {
-                                        inspectorRow("Prompt", prompt)
-                                    }
-
-                                    if let negativePrompt = metadata.negativePrompt {
-                                        inspectorRow("Negative Prompt", negativePrompt)
-                                    }
-                                }
+                    if hasInfoContent {
+                        InspectorSection("Info", isExpanded: $isInfoExpanded) {
+                            if isInspectingDroppedImage {
+                                inspectorRow("Source", "Dropped PNG (temporary)")
                             }
 
-                            if !metadata.generationParameters.isEmpty || !additionalMetadataEntries.isEmpty {
-                                NestedInspectorSection("Details", isExpanded: $isPNGDetailsExpanded) {
-                                    ForEach(metadata.generationParameters) { parameter in
-                                        inspectorRow(parameter.keyword, parameter.value)
-                                    }
+                            if hasPrompts {
+                                promptsCard(
+                                    prompt: metadata?.prompt,
+                                    negativePrompt: metadata?.negativePrompt
+                                )
+                            }
 
-                                    ForEach(additionalMetadataEntries) { entry in
-                                        inspectorRow(humanReadablePNGLabel(for: entry.keyword), entry.value)
-                                    }
+                            if let metadata {
+                                ForEach(metadata.generationParameters) { parameter in
+                                    inspectorRow(parameter.keyword, parameter.value)
+                                }
+
+                                ForEach(additionalMetadataEntries) { entry in
+                                    inspectorRow(humanReadablePNGLabel(for: entry.keyword), entry.value)
                                 }
                             }
                         }
@@ -466,54 +462,88 @@ struct ContentView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private func inspectorTagRow(_ label: String, _ value: String) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(label)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-            HStack(alignment: .center, spacing: 8) {
-                Text(value)
-                    .textSelection(.enabled)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                Button {
-                    copyInspectorTag(value)
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: copiedInspectorValue == value ? "checkmark" : "doc.on.doc")
-                            .font(.caption.weight(.semibold))
-
-                        Text(copiedInspectorValue == value ? "Copied" : "Copy")
-                            .font(.caption.weight(.semibold))
-                    }
-                    .foregroundStyle(copiedInspectorValue == value ? Color.accentColor : Color.primary)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 7)
-                    .background(
-                        RoundedRectangle(cornerRadius: 8)
-                            .fill(Color(nsColor: .controlBackgroundColor))
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 8)
-                            .stroke(
-                                copiedInspectorValue == value
-                                    ? Color.accentColor.opacity(0.35)
-                                    : Color.primary.opacity(0.08),
-                                lineWidth: 1
-                            )
-                    )
+    private func pathDisclosure(for image: ImageItem) -> some View {
+        HStack(spacing: 10) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.18)) {
+                    isPathExpanded.toggle()
                 }
-                .buttonStyle(.plain)
-                .help("Copy Tag")
+            } label: {
+                HStack(spacing: 10) {
+                    Image(systemName: isPathExpanded ? "chevron.right" : "chevron.left")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(isPathExpanded ? Color.accentColor : Color.secondary)
+                        .frame(width: 12)
 
+                    Text("Path")
+                        .font(.subheadline.weight(.semibold))
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if isPathExpanded {
+                pathInlineField(image.fileURL.path)
+                    .transition(.move(edge: .trailing).combined(with: .opacity))
+            } else {
                 Spacer(minLength: 0)
             }
+
+            Button {
+                copyInspectorValue(image.fileURL.path)
+            } label: {
+                Image(systemName: copiedInspectorValue == image.fileURL.path ? "checkmark" : "doc.on.doc")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(copiedInspectorValue == image.fileURL.path ? Color.accentColor : Color.secondary)
+                    .frame(width: 24, height: 24)
+            }
+            .buttonStyle(.plain)
+            .help("Copy Path")
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(height: 38)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(Color(nsColor: .windowBackgroundColor))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+        )
     }
 
-    private func copyInspectorTag(_ value: String) {
+    private func promptsCard(prompt: String?, negativePrompt: String?) -> some View {
+        PromptInspectorCard(
+            isPositiveExpanded: $isPositivePromptExpanded,
+            isNegativeExpanded: $isNegativePromptExpanded,
+            prompt: prompt,
+            negativePrompt: negativePrompt
+        )
+    }
+
+    private func pathInlineField(_ path: String) -> some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            Text(path)
+                .font(.system(.caption, design: .monospaced))
+                .textSelection(.enabled)
+                .lineLimit(1)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+        }
+        .frame(height: 26)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Color(nsColor: .controlBackgroundColor))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(Color.primary.opacity(colorScheme == .dark ? 0.10 : 0.08), lineWidth: 1)
+        )
+    }
+
+    private func copyInspectorValue(_ value: String) {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(value, forType: .string)
 
@@ -1055,10 +1085,10 @@ struct ContentView: View {
     private var searchPlaceholderDescription: String {
         if trimmedSearchText.count < Self.minimumSearchLength {
             let characterLabel = Self.minimumSearchLength == 1 ? "character" : "characters"
-            return "Type at least \(Self.minimumSearchLength) \(characterLabel) to search tags."
+            return "Type at least \(Self.minimumSearchLength) \(characterLabel) to search."
         }
 
-        return "No tags matched \"\(trimmedActiveSearchText)\"."
+        return "No results matched \"\(trimmedActiveSearchText)\"."
     }
 
     private func handleSearchTextChange(_ newValue: String) {
@@ -2109,6 +2139,74 @@ private struct NestedInspectorSection<Content: View>: View {
             Text(title)
                 .font(.subheadline.weight(.semibold))
         }
+    }
+}
+
+private struct PromptInspectorCard: View {
+    @Environment(\.colorScheme) private var colorScheme
+    @Binding var isPositiveExpanded: Bool
+    @Binding var isNegativeExpanded: Bool
+    let prompt: String?
+    let negativePrompt: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if let prompt, !prompt.isEmpty {
+                PromptDisclosureBlock(
+                    title: "Positive Prompt",
+                    value: prompt,
+                    isExpanded: $isPositiveExpanded
+                )
+            }
+
+            if let prompt, !prompt.isEmpty, let negativePrompt, !negativePrompt.isEmpty {
+                Rectangle()
+                    .fill(Color.primary.opacity(colorScheme == .dark ? 0.12 : 0.08))
+                    .frame(height: 1)
+            }
+
+            if let negativePrompt, !negativePrompt.isEmpty {
+                PromptDisclosureBlock(
+                    title: "Negative Prompt",
+                    value: negativePrompt,
+                    isExpanded: $isNegativeExpanded
+                )
+            }
+        }
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(
+                    Color.accentColor.opacity(colorScheme == .dark ? 0.10 : 0.08)
+                )
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(
+                    Color.accentColor.opacity(colorScheme == .dark ? 0.20 : 0.16),
+                    lineWidth: 1
+                )
+        )
+    }
+}
+
+private struct PromptDisclosureBlock: View {
+    let title: String
+    let value: String
+    @Binding var isExpanded: Bool
+
+    var body: some View {
+        DisclosureGroup(isExpanded: $isExpanded) {
+            Text(value)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.top, 8)
+        } label: {
+            Text(title)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 

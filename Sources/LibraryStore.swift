@@ -1,5 +1,4 @@
 import AppKit
-import Combine
 import Foundation
 
 final class LibraryStore: ObservableObject {
@@ -19,7 +18,6 @@ final class LibraryStore: ObservableObject {
     private var searchIndex: [ImageItem] = []
     private var favoriteImageIDs: Set<String>
     private var reloadTask: Task<Void, Never>?
-    private var cancellables: Set<AnyCancellable> = []
     private static let rootURLDefaultsKey = "selectedRootURL"
     private static let selectedCategoryDefaultsKey = "selectedCategoryID"
     private static let favoriteImageIDsDefaultsKey = "favoriteImageIDsByRoot"
@@ -62,13 +60,6 @@ final class LibraryStore: ObservableObject {
             errorMessage = nil
         }
 
-        appSettings.$appMode
-            .removeDuplicates()
-            .dropFirst()
-            .sink { [weak self] _ in
-                self?.reload()
-            }
-            .store(in: &cancellables)
     }
 
     var selectedCategory: Category? {
@@ -221,7 +212,8 @@ final class LibraryStore: ObservableObject {
         return Self.makeImageItem(from: fileURL, profile: Self.profile(for: appSettings.appMode))
     }
 
-    func chooseRootFolder() {
+    @discardableResult
+    func chooseRootFolder() -> Bool {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
@@ -234,11 +226,53 @@ final class LibraryStore: ObservableObject {
             persistRootURL(url)
             favoriteImageIDs = loadFavoriteImageIDs(for: url)
             reload()
+            return true
         }
+
+        return false
     }
 
     func searchTags(matching query: String, limit: Int) -> SearchResult {
         Self.profile(for: appSettings.appMode).search(matching: query, in: searchIndex, limit: limit)
+    }
+
+    func setAppMode(_ mode: AppMode) {
+        guard appSettings.appMode != mode else { return }
+        appSettings.appMode = mode
+        handleAppModeChange()
+    }
+
+    private func handleAppModeChange() {
+        if let persistedRootURL = Self.persistedRootURL(from: userDefaults) {
+            rootURL = persistedRootURL
+            favoriteImageIDs = loadFavoriteImageIDs(for: persistedRootURL)
+            reload()
+            return
+        }
+
+        if let suggestedRootURL = Self.profile(for: appSettings.appMode).suggestedInitialRootURL(
+            fileManager: fileManager,
+            bundleURL: Bundle.main.bundleURL,
+            sourceFilePath: #filePath
+        ) {
+            rootURL = suggestedRootURL
+            favoriteImageIDs = loadFavoriteImageIDs(for: suggestedRootURL)
+            reload()
+            return
+        }
+
+        reloadTask?.cancel()
+        rootURL = fileManager.homeDirectoryForCurrentUser
+        favoriteImageIDs = loadFavoriteImageIDs(for: rootURL)
+        pngInfoCache.removeAll()
+        folderMetadataCache.removeAll()
+        searchIndex = []
+        sourceCategories = []
+        categories = []
+        persistSelectedCategoryID(nil)
+        selectedImageID = nil
+        errorMessage = nil
+        isLoading = false
     }
 
     private static func loadImages(in folderURL: URL, profile: any LibraryProfile) throws -> [ImageItem] {
@@ -378,8 +412,8 @@ final class LibraryStore: ObservableObject {
         }
 
         return result.sorted {
-            categorySortKey(for: $0.folderURL, relativeTo: rootURL)
-                .localizedCaseInsensitiveCompare(categorySortKey(for: $1.folderURL, relativeTo: rootURL)) == .orderedAscending
+            categorySortKey(for: $0.folderURL, relativeTo: rootURL, profile: profile)
+                .localizedCaseInsensitiveCompare(categorySortKey(for: $1.folderURL, relativeTo: rootURL, profile: profile)) == .orderedAscending
         }
     }
 
@@ -473,25 +507,6 @@ final class LibraryStore: ObservableObject {
         return relativeComponents.joined(separator: "/")
     }
 
-    private static func categoryPathParts(for folderURL: URL, relativeTo rootURL: URL) -> [String] {
-        if folderURL.standardizedFileURL == rootURL.standardizedFileURL {
-            let rootName = rootURL.lastPathComponent.trimmingCharacters(in: .whitespacesAndNewlines)
-            return [rootName.isEmpty ? "Library" : rootName]
-        }
-
-        let relativePath = categoryID(for: folderURL, relativeTo: rootURL)
-        let components = relativePath
-            .split(separator: "/")
-            .map(String.init)
-            .filter { !$0.isEmpty }
-
-        if components.count <= 1, let first = components.first {
-            return folderNameParts(for: first)
-        }
-
-        return components
-    }
-
     private static func categoryName(for pathParts: [String]) -> String {
         pathParts
             .map(humanize)
@@ -517,22 +532,12 @@ final class LibraryStore: ObservableObject {
             .joined(separator: " / ")
     }
 
-    private static func folderNameParts(for slug: String) -> [String] {
-        let normalized = slug.replacingOccurrences(of: "_-_", with: " - ")
-        let separator = " - "
-
-        if normalized.contains(separator) {
-            return normalized
-                .components(separatedBy: separator)
-                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-                .filter { !$0.isEmpty }
-        }
-
-        return [slug]
-    }
-
-    private static func categorySortKey(for folderURL: URL, relativeTo rootURL: URL) -> String {
-        categoryPathParts(for: folderURL, relativeTo: rootURL)
+    private static func categorySortKey(
+        for folderURL: URL,
+        relativeTo rootURL: URL,
+        profile: any LibraryProfile
+    ) -> String {
+        profile.categoryPathParts(for: folderURL, relativeTo: rootURL)
             .map { $0.lowercased() }
             .joined(separator: "/")
     }
@@ -567,27 +572,4 @@ final class LibraryStore: ObservableObject {
         }
     }
 
-    private static func defaultRootURL() -> URL? {
-        let repoRoot = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-        let gensURL = repoRoot.appendingPathComponent("gens", isDirectory: true)
-        let fileManager = FileManager.default
-
-        if fileManager.fileExists(atPath: gensURL.path) {
-            return gensURL
-        }
-
-        let bundleURL = Bundle.main.bundleURL
-        let bundleCandidates = [
-            bundleURL.deletingLastPathComponent().appendingPathComponent("gens", isDirectory: true),
-            bundleURL.deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("gens", isDirectory: true)
-        ]
-
-        for candidate in bundleCandidates where fileManager.fileExists(atPath: candidate.path) {
-            return candidate
-        }
-
-        return nil
-    }
 }
