@@ -18,6 +18,9 @@ final class LibraryStore: ObservableObject {
     private var searchIndex: [ImageItem] = []
     private var favoriteImageIDs: Set<String>
     private var reloadTask: Task<Void, Never>?
+    private var indexScanTask: Task<Void, Never>?
+    private(set) var metadataIndex: MetadataIndex?
+    @Published var indexProgress: Double = 0
     private static let rootURLDefaultsKey = "selectedRootURL"
     private static let selectedCategoryDefaultsKey = "selectedCategoryID"
     private static let favoriteImageIDsDefaultsKey = "favoriteImageIDsByRoot"
@@ -52,6 +55,7 @@ final class LibraryStore: ObservableObject {
             rebuildCategories()
             selectedCategoryID = Self.validCategoryID(current: selectedCategoryID, categories: categories)
             selectedImageID = Self.validImageID(current: selectedImageID, categories: categories, selectedCategoryID: selectedCategoryID)
+            startBackgroundIndexing()
         } else {
             categories = []
             sourceCategories = []
@@ -125,6 +129,7 @@ final class LibraryStore: ObservableObject {
                     selectedImageID = Self.validImageID(current: selectedImageID, categories: categories, selectedCategoryID: selectedCategoryID)
                     errorMessage = nil
                     isLoading = false
+                    startBackgroundIndexing()
                 }
             } catch is CancellationError {
                 // superseded by a newer reload — leave isLoading for the replacement task to clear
@@ -262,6 +267,10 @@ final class LibraryStore: ObservableObject {
         }
 
         reloadTask?.cancel()
+        indexScanTask?.cancel()
+        indexScanTask = nil
+        metadataIndex = nil
+        indexProgress = 0
         rootURL = fileManager.homeDirectoryForCurrentUser
         favoriteImageIDs = loadFavoriteImageIDs(for: rootURL)
         pngInfoCache.removeAll()
@@ -307,6 +316,27 @@ final class LibraryStore: ObservableObject {
         }
 
         return merged
+    }
+
+    private func startBackgroundIndexing() {
+        indexScanTask?.cancel()
+        let images = searchIndex
+        let url = rootURL
+        guard !images.isEmpty else { return }
+        indexProgress = 0
+
+        indexScanTask = Task {
+            do {
+                let index = try MetadataIndex(rootURL: url)
+                await MainActor.run { [weak self] in self?.metadataIndex = index }
+                guard !Task.isCancelled else { return }
+                await index.scan(images: images) { @Sendable [weak self] progress in
+                    Task { @MainActor [weak self] in self?.indexProgress = progress }
+                }
+            } catch {
+                // Indexing is a best-effort enhancement; the app works fine without it.
+            }
+        }
     }
 
     private func rebuildCategories() {

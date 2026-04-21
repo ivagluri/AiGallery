@@ -59,3 +59,31 @@ struct SearchResult: Hashable {
 
     static let empty = SearchResult(images: [], totalMatches: 0)
 }
+
+enum MetadataField: String, CaseIterable {
+    case model, sampler, scheduler, vae, upscaler
+
+    var displayName: String {
+        switch self {
+        case .model:     return "Model"
+        case .sampler:   return "Sampler"
+        case .scheduler: return "Scheduler"
+        case .vae:       return "VAE"
+        case .upscaler:  return "Upscaler"
+        }
+    }
+
+    var columnName: String { rawValue }
+}
+
+struct MetadataFilter: Identifiable, Hashable {
+    let id: UUID
+    let field: MetadataField
+    let value: String
+
+    init(field: MetadataField, value: String) {
+        self.id = UUID()
+        self.field = field
+        self.value = value
+    }
+}

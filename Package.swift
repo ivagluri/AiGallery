@@ -15,7 +15,8 @@ let package = Package(
     targets: [
         .executableTarget(
             name: "AiGallery",
-            path: "Sources"
+            path: "Sources",
+            linkerSettings: [.linkedLibrary("sqlite3")]
         ),
     ]
 )
