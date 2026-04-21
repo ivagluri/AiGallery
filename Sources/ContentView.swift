@@ -24,7 +24,7 @@ struct ContentView: View {
     @State private var savedBrowseSelection: BrowseSelection?
     @State private var searchSelectedImageID: ImageItem.ID?
     @State private var pendingSearchUpdateTask: DispatchWorkItem?
-    @State private var activeSearchResults: TagSearchResult = .empty
+    @State private var activeSearchResults: SearchResult = .empty
     @StateObject private var previewController = PreviewOverlayController()
     @StateObject private var displayImageCache = DisplayImageCache()
     @State private var hostWindow: NSWindow?
@@ -405,7 +405,7 @@ struct ContentView: View {
                         if isInspectingDroppedImage {
                             inspectorRow("Source", "Dropped PNG (temporary)")
                         }
-                        inspectorTagRow("Tag", image.inferredTag)
+                        inspectorTagRow("Tag", image.displayLabel)
                         inspectorRow("Filename", image.fileURL.lastPathComponent)
                         inspectorRow("Path", image.fileURL.path)
                     }
@@ -1674,7 +1674,7 @@ private final class DisplayImageCache: ObservableObject {
 
         cachedKey = key
         cachedImages = category.images.sorted { lhs, rhs in
-            let comparison = lhs.inferredTag.localizedCaseInsensitiveCompare(rhs.inferredTag)
+            let comparison = lhs.displayLabel.localizedCaseInsensitiveCompare(rhs.displayLabel)
 
             switch order {
             case .alphabeticalAscending:
@@ -1965,7 +1965,7 @@ private struct ThumbnailCell: View {
                 .padding(8)
             }
 
-            Text(image.inferredTag)
+            Text(image.displayLabel)
                 .font(.subheadline)
                 .lineLimit(2)
         }

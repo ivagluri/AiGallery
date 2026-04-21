@@ -19,12 +19,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 @main
 struct AiGalleryApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
-    @StateObject private var library = LibraryStore()
+    @StateObject private var settings: AppSettings
+    @StateObject private var library: LibraryStore
+
+    init() {
+        let settings = AppSettings()
+        _settings = StateObject(wrappedValue: settings)
+        _library = StateObject(wrappedValue: LibraryStore(appSettings: settings))
+    }
 
     var body: some Scene {
         WindowGroup {
             ContentView()
                 .environmentObject(library)
+                .environmentObject(settings)
                 .frame(minWidth: 900, minHeight: 640)
         }
         .defaultSize(width: 1500, height: 920)
@@ -35,6 +43,18 @@ struct AiGalleryApp: App {
                     library.chooseRootFolder()
                 }
                 .keyboardShortcut("o")
+            }
+
+            CommandMenu("Mode") {
+                Toggle(
+                    "TagExplorer Legacy Mode",
+                    isOn: Binding(
+                        get: { settings.appMode == .tagExplorerLegacy },
+                        set: { isEnabled in
+                            settings.appMode = isEnabled ? .tagExplorerLegacy : .general
+                        }
+                    )
+                )
             }
         }
     }

@@ -16,7 +16,7 @@ struct ImageItem: Identifiable, Hashable {
     let id: String
     let fileURL: URL
     let displayName: String
-    let inferredTag: String
+    let displayLabel: String
 }
 
 struct ImageMetadata: Hashable {
@@ -53,9 +53,9 @@ struct CategoryGroup: Identifiable, Hashable {
     }
 }
 
-struct TagSearchResult: Hashable {
+struct SearchResult: Hashable {
     let images: [ImageItem]
     let totalMatches: Int
 
-    static let empty = TagSearchResult(images: [], totalMatches: 0)
+    static let empty = SearchResult(images: [], totalMatches: 0)
 }

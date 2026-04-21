@@ -1,9 +1,0 @@
-atmospheric perspective
-fisheye
-panorama
-perspective
-vanishing point
-variations
-depth of field
-blurry background
-blurry foreground

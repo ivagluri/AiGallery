@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import Foundation
 
 final class LibraryStore: ObservableObject {
@@ -10,6 +11,7 @@ final class LibraryStore: ObservableObject {
     @Published var isLoading = false
 
     private let fileManager = FileManager.default
+    private let appSettings: AppSettings
     private let userDefaults: UserDefaults
     private var pngInfoCache: [String: ImageMetadata?] = [:]
     private var folderMetadataCache: [String: ImageMetadata?] = [:]
@@ -17,6 +19,7 @@ final class LibraryStore: ObservableObject {
     private var searchIndex: [ImageItem] = []
     private var favoriteImageIDs: Set<String>
     private var reloadTask: Task<Void, Never>?
+    private var cancellables: Set<AnyCancellable> = []
     private static let rootURLDefaultsKey = "selectedRootURL"
     private static let selectedCategoryDefaultsKey = "selectedCategoryID"
     private static let favoriteImageIDsDefaultsKey = "favoriteImageIDsByRoot"
@@ -24,9 +27,14 @@ final class LibraryStore: ObservableObject {
     private static let rootCategoryID = "__root__"
     private static let favoritesID = "__favorites__"
 
-    init(userDefaults: UserDefaults = .standard) {
+    init(appSettings: AppSettings, userDefaults: UserDefaults = .standard) {
+        self.appSettings = appSettings
         self.userDefaults = userDefaults
-        let defaultRootURL = Self.persistedRootURL(from: userDefaults) ?? Self.defaultRootURL()
+        let defaultRootURL = Self.persistedRootURL(from: userDefaults) ?? Self.profile(for: appSettings.appMode).suggestedInitialRootURL(
+            fileManager: FileManager.default,
+            bundleURL: Bundle.main.bundleURL,
+            sourceFilePath: #filePath
+        )
         let fallbackRootURL = FileManager.default.homeDirectoryForCurrentUser
         self.rootURL = defaultRootURL ?? fallbackRootURL
         self.selectedCategoryID = userDefaults.string(forKey: Self.selectedCategoryDefaultsKey)
@@ -35,7 +43,10 @@ final class LibraryStore: ObservableObject {
 
         if defaultRootURL != nil {
             // Synchronous on init so the window only appears once content is ready.
-            if let (loaded, index) = try? Self.buildLibrary(rootURL: self.rootURL) {
+            if let (loaded, index) = try? Self.buildLibrary(
+                rootURL: self.rootURL,
+                profile: Self.profile(for: appSettings.appMode)
+            ) {
                 sourceCategories = loaded
                 searchIndex = index
             }
@@ -50,6 +61,14 @@ final class LibraryStore: ObservableObject {
             selectedImageID = nil
             errorMessage = nil
         }
+
+        appSettings.$appMode
+            .removeDuplicates()
+            .dropFirst()
+            .sink { [weak self] _ in
+                self?.reload()
+            }
+            .store(in: &cancellables)
     }
 
     var selectedCategory: Category? {
@@ -92,12 +111,13 @@ final class LibraryStore: ObservableObject {
     func reload() {
         reloadTask?.cancel()
         let capturedRootURL = rootURL
+        let capturedProfile = Self.profile(for: appSettings.appMode)
         isLoading = true
 
         reloadTask = Task {
             do {
                 let (loadedCategories, loadedSearchIndex) = try await Task.detached(priority: .userInitiated) {
-                    try Self.buildLibrary(rootURL: capturedRootURL)
+                    try Self.buildLibrary(rootURL: capturedRootURL, profile: capturedProfile)
                 }.value
 
                 try Task.checkCancellation()
@@ -198,7 +218,7 @@ final class LibraryStore: ObservableObject {
             return nil
         }
 
-        return Self.makeImageItem(from: fileURL)
+        return Self.makeImageItem(from: fileURL, profile: Self.profile(for: appSettings.appMode))
     }
 
     func chooseRootFolder() {
@@ -217,53 +237,11 @@ final class LibraryStore: ObservableObject {
         }
     }
 
-    func searchTags(matching query: String, limit: Int) -> TagSearchResult {
-        let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedQuery.isEmpty else {
-            return .empty
-        }
-
-        let normalizedQuery = trimmedQuery.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
-        let safeLimit = max(limit, 1)
-
-        var exactMatches: [ImageItem] = []
-        var prefixMatches: [ImageItem] = []
-        var containsMatches: [ImageItem] = []
-
-        exactMatches.reserveCapacity(min(safeLimit, 8))
-        prefixMatches.reserveCapacity(min(safeLimit, 32))
-        containsMatches.reserveCapacity(min(safeLimit, 64))
-
-        var totalMatches = 0
-
-        for image in searchIndex {
-            let normalizedTag = image.inferredTag.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
-            guard normalizedTag.contains(normalizedQuery) else {
-                continue
-            }
-
-            totalMatches += 1
-            let currentVisibleCount = exactMatches.count + prefixMatches.count + containsMatches.count
-            guard currentVisibleCount < safeLimit else {
-                continue
-            }
-
-            if normalizedTag == normalizedQuery {
-                exactMatches.append(image)
-            } else if normalizedTag.hasPrefix(normalizedQuery) {
-                prefixMatches.append(image)
-            } else {
-                containsMatches.append(image)
-            }
-        }
-
-        return TagSearchResult(
-            images: exactMatches + prefixMatches + containsMatches,
-            totalMatches: totalMatches
-        )
+    func searchTags(matching query: String, limit: Int) -> SearchResult {
+        Self.profile(for: appSettings.appMode).search(matching: query, in: searchIndex, limit: limit)
     }
 
-    private static func loadImages(in folderURL: URL) throws -> [ImageItem] {
+    private static func loadImages(in folderURL: URL, profile: any LibraryProfile) throws -> [ImageItem] {
         let imageURLs = try FileManager.default.contentsOfDirectory(
             at: folderURL,
             includingPropertiesForKeys: [.isRegularFileKey],
@@ -272,7 +250,7 @@ final class LibraryStore: ObservableObject {
         .filter(isSupportedImage)
         .sorted { $0.lastPathComponent.localizedCaseInsensitiveCompare($1.lastPathComponent) == .orderedAscending }
 
-        return imageURLs.map(makeImageItem)
+        return imageURLs.map { makeImageItem(from: $0, profile: profile) }
     }
 
     private func folderMetadata(for image: ImageItem) -> ImageMetadata? {
@@ -301,7 +279,7 @@ final class LibraryStore: ObservableObject {
         let favoriteImages = sourceCategories
             .flatMap(\.images)
             .filter { favoriteImageIDs.contains($0.id) }
-            .sorted { $0.inferredTag.localizedCaseInsensitiveCompare($1.inferredTag) == .orderedAscending }
+            .sorted { $0.displayLabel.localizedCaseInsensitiveCompare($1.displayLabel) == .orderedAscending }
 
         if favoriteImages.isEmpty {
             categories = sourceCategories
@@ -372,10 +350,13 @@ final class LibraryStore: ObservableObject {
         return legacyFavoriteImageIDs
     }
 
-    private static func discoverCategoryFolders(rootURL: URL) throws -> [(folderURL: URL, images: [ImageItem])] {
+    private static func discoverCategoryFolders(
+        rootURL: URL,
+        profile: any LibraryProfile
+    ) throws -> [(folderURL: URL, images: [ImageItem])] {
         var result: [(folderURL: URL, images: [ImageItem])] = []
 
-        let rootImages = try loadImages(in: rootURL)
+        let rootImages = try loadImages(in: rootURL, profile: profile)
         if !rootImages.isEmpty {
             result.append((rootURL, rootImages))
         }
@@ -390,7 +371,7 @@ final class LibraryStore: ObservableObject {
 
         for case let url as URL in enumerator {
             guard isDirectory(url) else { continue }
-            let images = try loadImages(in: url)
+            let images = try loadImages(in: url, profile: profile)
             if !images.isEmpty {
                 result.append((url, images))
             }
@@ -402,10 +383,13 @@ final class LibraryStore: ObservableObject {
         }
     }
 
-    private static func buildLibrary(rootURL: URL) throws -> (categories: [Category], searchIndex: [ImageItem]) {
-        let folders = try discoverCategoryFolders(rootURL: rootURL)
+    private static func buildLibrary(
+        rootURL: URL,
+        profile: any LibraryProfile
+    ) throws -> (categories: [Category], searchIndex: [ImageItem]) {
+        let folders = try discoverCategoryFolders(rootURL: rootURL, profile: profile)
         let loadedCategories = folders.map { folderURL, images in
-            let pathParts = categoryPathParts(for: folderURL, relativeTo: rootURL)
+            let pathParts = profile.categoryPathParts(for: folderURL, relativeTo: rootURL)
             return Category(
                 id: categoryID(for: folderURL, relativeTo: rootURL),
                 name: categoryName(for: pathParts),
@@ -430,15 +414,15 @@ final class LibraryStore: ObservableObject {
         return supportedExtensions.contains(url.pathExtension.lowercased())
     }
 
-    private static func makeImageItem(from url: URL) -> ImageItem {
+    private static func makeImageItem(from url: URL, profile: any LibraryProfile) -> ImageItem {
         let displayName = url.deletingPathExtension().lastPathComponent
-        let inferredTag = inferTag(from: displayName)
+        let displayLabel = profile.displayLabel(for: displayName)
 
         return ImageItem(
             id: url.path,
             fileURL: url,
             displayName: displayName,
-            inferredTag: inferredTag
+            displayLabel: displayLabel
         )
     }
 
@@ -446,17 +430,12 @@ final class LibraryStore: ObservableObject {
         categories
             .flatMap(\.images)
             .sorted { lhs, rhs in
-                let comparison = lhs.inferredTag.localizedCaseInsensitiveCompare(rhs.inferredTag)
+                let comparison = lhs.displayLabel.localizedCaseInsensitiveCompare(rhs.displayLabel)
                 if comparison == .orderedSame {
                     return lhs.displayName.localizedCaseInsensitiveCompare(rhs.displayName) == .orderedAscending
                 }
                 return comparison == .orderedAscending
             }
-    }
-
-    private static func inferTag(from displayName: String) -> String {
-        let cleaned = displayName.replacingOccurrences(of: "_00001_", with: "")
-        return cleaned.replacingOccurrences(of: "_", with: " ")
     }
 
     private static func persistedRootURL(from userDefaults: UserDefaults) -> URL? {
@@ -577,6 +556,15 @@ final class LibraryStore: ObservableObject {
             return category.images.first?.id
         }
         return current
+    }
+
+    private static func profile(for mode: AppMode) -> any LibraryProfile {
+        switch mode {
+        case .general:
+            return GeneralLibraryProfile()
+        case .tagExplorerLegacy:
+            return TagExplorerLegacyProfile()
+        }
     }
 
     private static func defaultRootURL() -> URL? {
