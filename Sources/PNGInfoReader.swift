@@ -51,12 +51,14 @@ enum PNGInfoReader {
 
         let prompt = parsedParameters?.prompt ?? parsedComfyUI?.prompt ?? parsedDrawThings?.prompt
         let negativePrompt = parsedParameters?.negativePrompt ?? parsedComfyUI?.negativePrompt ?? parsedDrawThings?.negativePrompt
+        let promptStatusMessage = parsedComfyUI?.promptStatusMessage
         let generationParameters = parsedParameters?.parameters ?? parsedComfyUI?.parameters ?? parsedDrawThings?.parameters ?? []
         let hiddenKeywords = (parsedComfyUI?.consumedKeywords ?? []).union(parsedDrawThings?.consumedKeywords ?? [])
 
         return ImageMetadata(
             prompt: prompt,
             negativePrompt: negativePrompt,
+            promptStatusMessage: promptStatusMessage,
             generationParameters: generationParameters,
             textEntries: textEntries.filter { !hiddenKeywords.contains($0.keyword.lowercased()) }
         )
@@ -293,10 +295,20 @@ enum PNGInfoReader {
         )
     }
 
-    private static func parseComfyUIPrompt(from textEntries: [PNGTextEntry]) -> (prompt: String?, negativePrompt: String?, parameters: [PNGTextEntry], consumedKeywords: Set<String>)? {
+    private static func parseComfyUIPrompt(from textEntries: [PNGTextEntry]) -> (prompt: String?, negativePrompt: String?, promptStatusMessage: String?, parameters: [PNGTextEntry], consumedKeywords: Set<String>)? {
         guard
-            let promptEntry = textEntries.first(where: { $0.keyword.compare("prompt", options: .caseInsensitive) == .orderedSame }),
-            let promptData = promptEntry.value.data(using: .utf8),
+            let promptEntry = textEntries.first(where: { $0.keyword.compare("prompt", options: .caseInsensitive) == .orderedSame })
+        else {
+            return nil
+        }
+
+        // ComfyUI emits non-standard JSON tokens (NaN, Infinity) that JSONSerialization rejects.
+        let sanitizedValue = promptEntry.value
+            .replacingOccurrences(of: #"\bNaN\b"#, with: "null", options: .regularExpression)
+            .replacingOccurrences(of: #"\bInfinity\b"#, with: "null", options: .regularExpression)
+
+        guard
+            let promptData = sanitizedValue.data(using: .utf8),
             let json = try? JSONSerialization.jsonObject(with: promptData),
             let nodes = json as? [String: [String: Any]]
         else {
@@ -343,12 +355,11 @@ enum PNGInfoReader {
 
         let dedupedParameters = deduplicateEntries(parameters)
         let consumedKeywords = Set(["prompt", "workflow"])
+        let promptStatusMessage = positivePrompt == nil
+            ? "Unable to reconstruct prompt from ComfyUI nodes"
+            : nil
 
-        guard positivePrompt != nil || negativePrompt != nil || !dedupedParameters.isEmpty else {
-            return nil
-        }
-
-        return (positivePrompt, negativePrompt, dedupedParameters, consumedKeywords)
+        return (positivePrompt, negativePrompt, promptStatusMessage, dedupedParameters, consumedKeywords)
     }
 
     private static func parseDrawThingsXMP(from textEntries: [PNGTextEntry]) -> (prompt: String?, negativePrompt: String?, parameters: [PNGTextEntry], consumedKeywords: Set<String>)? {
@@ -734,25 +745,119 @@ enum PNGInfoReader {
         }
     }
 
-    private static func nodeReference(forInput key: String, in node: [String: Any], nodes: [String: [String: Any]]) -> [String: Any]? {
+    private static func nodeReferenceID(forInput key: String, in node: [String: Any]) -> String? {
         guard let reference = inputs(of: node)[key] as? [Any], let nodeID = reference.first else {
             return nil
         }
 
-        let id = String(describing: nodeID)
+        return String(describing: nodeID)
+    }
+
+    private static func nodeReference(forInput key: String, in node: [String: Any], nodes: [String: [String: Any]]) -> [String: Any]? {
+        guard let id = nodeReferenceID(forInput: key, in: node) else {
+            return nil
+        }
+
         return nodes[id]
     }
 
     private static func nodeText(forInput key: String, in node: [String: Any], nodes: [String: [String: Any]]) -> String? {
-        guard let referencedNode = nodeReference(forInput: key, in: node, nodes: nodes) else {
+        guard
+            let referencedNodeID = nodeReferenceID(forInput: key, in: node),
+            let referencedNode = nodes[referencedNodeID]
+        else {
             return nil
         }
+        return resolveTextFromNode(referencedNode, nodeID: referencedNodeID, nodes: nodes, depth: 0)
+    }
 
-        if let text = stringInput(named: "text", in: referencedNode) {
+    // Recursively resolves text output from a node, following known string-producing node types.
+    private static func resolveTextFromNode(_ node: [String: Any], nodeID: String?, nodes: [String: [String: Any]], depth: Int) -> String? {
+        guard depth < 8 else { return nil }
+
+        if let text = stringInput(named: "text", in: node), !text.isEmpty {
             return text
         }
 
+        if let resolvedText = resolveStringPart(forInput: "text", in: node, nodes: nodes, depth: depth) {
+            return resolvedText
+        }
+
+        if let nodeID, let previewText = previewText(forSourceNodeID: nodeID, in: nodes) {
+            return previewText
+        }
+
+        switch classType(of: node) {
+        case "StringConcatenate", "String Concatenate", "JoinStrings", "ConcatStrings":
+            let delim = stringInput(named: "delimiter", in: node)
+                ?? widgetStringValue(forInput: "delimiter", in: node)
+                ?? ""
+            let a = resolveStringPart(forInput: "string_a", in: node, nodes: nodes, depth: depth)
+            let b = resolveStringPart(forInput: "string_b", in: node, nodes: nodes, depth: depth)
+            let parts = [a, b].compactMap { $0?.nilIfEmpty }.filter { !$0.isEmpty }
+            return parts.isEmpty ? nil : parts.joined(separator: delim)
+        case "PreviewAny":
+            return stringInput(named: "preview_text", in: node)
+                ?? stringInput(named: "preview_markdown", in: node)
+        default:
+            return nil
+        }
+    }
+
+    private static func resolveStringPart(forInput key: String, in node: [String: Any], nodes: [String: [String: Any]], depth: Int) -> String? {
+        let nodeInputs = inputs(of: node)
+        if let direct = nodeInputs[key] as? String { return direct }
+        if let referencedNodeID = nodeReferenceID(forInput: key, in: node),
+           let refNode = nodes[referencedNodeID] {
+            return resolveTextFromNode(refNode, nodeID: referencedNodeID, nodes: nodes, depth: depth + 1)
+        }
+        return widgetStringValue(forInput: key, in: node)
+    }
+
+    private static func previewText(forSourceNodeID sourceNodeID: String, in nodes: [String: [String: Any]]) -> String? {
+        for previewNode in nodes.values where classType(of: previewNode) == "PreviewAny" {
+            guard nodeReferenceID(forInput: "source", in: previewNode) == sourceNodeID else {
+                continue
+            }
+
+            let previewText = stringInput(named: "preview_text", in: previewNode)
+                ?? stringInput(named: "preview_markdown", in: previewNode)
+            if let previewText, !previewText.isEmpty {
+                return previewText
+            }
+        }
+
         return nil
+    }
+
+    private static func widgetStringValue(forInput key: String, in node: [String: Any]) -> String? {
+        guard let widgets = node["widgets_values"] as? [Any] else {
+            return nil
+        }
+
+        let index: Int?
+
+        switch classType(of: node) {
+        case "StringConcatenate", "String Concatenate", "JoinStrings", "ConcatStrings":
+            switch key {
+            case "string_a":
+                index = 0
+            case "string_b":
+                index = 1
+            case "delimiter":
+                index = 2
+            default:
+                index = nil
+            }
+        default:
+            index = nil
+        }
+
+        guard let index, widgets.indices.contains(index) else {
+            return nil
+        }
+
+        return stringify(widgets[index])?.nilIfEmpty
     }
 
     private static func latentImageSize(for samplerNode: [String: Any], nodes: [String: [String: Any]]) -> String? {

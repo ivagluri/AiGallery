@@ -573,7 +573,9 @@ struct ContentView: View {
         ScrollView {
             if let image = displayedSelectedImage {
                 let metadata = library.inspectorMetadata(for: image)
-                let hasPrompts = (metadata?.prompt?.isEmpty == false) || (metadata?.negativePrompt?.isEmpty == false)
+                let hasPrompts = (metadata?.prompt?.isEmpty == false)
+                    || (metadata?.negativePrompt?.isEmpty == false)
+                    || (metadata?.promptStatusMessage?.isEmpty == false)
                 let additionalMetadataEntries = metadata.map { metadata in
                     metadata.textEntries.filter { entry in
                         shouldDisplayMetadataEntry(
@@ -614,7 +616,8 @@ struct ContentView: View {
                             if hasPrompts {
                                 promptsCard(
                                     prompt: metadata?.prompt,
-                                    negativePrompt: metadata?.negativePrompt
+                                    negativePrompt: metadata?.negativePrompt,
+                                    promptStatusMessage: metadata?.promptStatusMessage
                                 )
                             }
 
@@ -700,12 +703,13 @@ struct ContentView: View {
         )
     }
 
-    private func promptsCard(prompt: String?, negativePrompt: String?) -> some View {
+    private func promptsCard(prompt: String?, negativePrompt: String?, promptStatusMessage: String?) -> some View {
         PromptInspectorCard(
             isPositiveExpanded: $isPositivePromptExpanded,
             isNegativeExpanded: $isNegativePromptExpanded,
             prompt: prompt,
-            negativePrompt: negativePrompt
+            negativePrompt: negativePrompt,
+            promptStatusMessage: promptStatusMessage
         )
     }
 
@@ -2437,8 +2441,13 @@ private struct PromptInspectorCard: View {
     @Binding var isNegativeExpanded: Bool
     let prompt: String?
     let negativePrompt: String?
+    let promptStatusMessage: String?
 
     var body: some View {
+        let showsPositivePrompt = prompt?.isEmpty == false
+        let showsNegativePrompt = negativePrompt?.isEmpty == false
+        let showsPromptStatusMessage = promptStatusMessage?.isEmpty == false
+
         VStack(alignment: .leading, spacing: 12) {
             if let prompt, !prompt.isEmpty {
                 PromptDisclosureBlock(
@@ -2448,7 +2457,20 @@ private struct PromptInspectorCard: View {
                 )
             }
 
-            if let prompt, !prompt.isEmpty, let negativePrompt, !negativePrompt.isEmpty {
+            if showsPositivePrompt && (showsNegativePrompt || showsPromptStatusMessage) {
+                Rectangle()
+                    .fill(Color.primary.opacity(colorScheme == .dark ? 0.12 : 0.08))
+                    .frame(height: 1)
+            }
+
+            if let promptStatusMessage, !promptStatusMessage.isEmpty {
+                Text(promptStatusMessage)
+                    .font(.system(.caption, design: .default))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            if showsPromptStatusMessage && showsNegativePrompt {
                 Rectangle()
                     .fill(Color.primary.opacity(colorScheme == .dark ? 0.12 : 0.08))
                     .frame(height: 1)

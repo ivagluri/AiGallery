@@ -63,6 +63,7 @@ enum FolderMetadataReader {
         let metadata = ImageMetadata(
             prompt: prompt,
             negativePrompt: negativePrompt,
+            promptStatusMessage: nil,
             generationParameters: deduplicate(generationParameters),
             textEntries: mergedTextEntries
         )
@@ -140,6 +141,7 @@ enum FolderMetadataReader {
         let metadata = ImageMetadata(
             prompt: prompt?.nilIfEmpty,
             negativePrompt: negativePrompt?.nilIfEmpty,
+            promptStatusMessage: nil,
             generationParameters: deduplicate(generationParameters),
             textEntries: deduplicate(textEntries)
         )

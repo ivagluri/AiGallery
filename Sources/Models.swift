@@ -22,12 +22,14 @@ struct ImageItem: Identifiable, Hashable {
 struct ImageMetadata: Hashable {
     let prompt: String?
     let negativePrompt: String?
+    let promptStatusMessage: String?
     let generationParameters: [PNGTextEntry]
     let textEntries: [PNGTextEntry]
 
     var hasVisibleContent: Bool {
         prompt?.isEmpty == false
             || negativePrompt?.isEmpty == false
+            || promptStatusMessage?.isEmpty == false
             || !generationParameters.isEmpty
             || !textEntries.isEmpty
     }

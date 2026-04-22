@@ -228,6 +228,9 @@ final class LibraryStore: ObservableObject {
 
         let prompt = pngInfo?.prompt ?? folderMetadata?.prompt
         let negativePrompt = pngInfo?.negativePrompt ?? folderMetadata?.negativePrompt
+        let promptStatusMessage = prompt == nil
+            ? (pngInfo?.promptStatusMessage ?? folderMetadata?.promptStatusMessage)
+            : nil
         let generationParameters = mergeEntries(
             primary: pngInfo?.generationParameters ?? [],
             fallback: folderMetadata?.generationParameters ?? []
@@ -240,6 +243,7 @@ final class LibraryStore: ObservableObject {
         let metadata = ImageMetadata(
             prompt: prompt,
             negativePrompt: negativePrompt,
+            promptStatusMessage: promptStatusMessage,
             generationParameters: generationParameters,
             textEntries: textEntries
         )
