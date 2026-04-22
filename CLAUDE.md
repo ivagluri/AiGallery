@@ -13,16 +13,17 @@ Native macOS SwiftUI app (minimum macOS 13). A general-purpose AI-generated imag
 | File | Role | Lines |
 |---|---|---|
 | `Sources/TagBrowserApp.swift` | App entry point, AppDelegate | 62 |
-| `Sources/ContentView.swift` | Main UI — sidebar, grid, inspector, search, filter bar | 2639 |
-| `Sources/LibraryStore.swift` | Core state — scanning, categories, filters, smart filters, metadata index | 822 |
+| `Sources/ContentView.swift` | Main UI — sidebar, grid, inspector, search, filter bar | 2690 |
+| `Sources/LibraryStore.swift` | Core state — scanning, categories, filters, smart filters, metadata index | 826 |
 | `Sources/MetadataIndex.swift` | SQLite-backed persistent metadata index (actor) | 441 |
 | `Sources/LibraryProfile.swift` | Search algorithm + `parseSearchTerms` + mode-specific folder logic | 190 |
-| `Sources/Models.swift` | Data structs: Category, ImageItem, ImageMetadata, SmartFilter, MetadataField, MetadataFilter | 101 |
-| `Sources/PNGInfoReader.swift` | PNG chunk parser (A1111, ComfyUI, DrawThings formats) | 877 |
-| `Sources/FolderMetadataReader.swift` | Folder-level metadata fallback (JSON/CFG files) | 277 |
+| `Sources/Models.swift` | Data structs: Category, ImageItem, ImageMetadata, SmartFilter, MetadataField, MetadataFilter | 103 |
+| `Sources/PNGInfoReader.swift` | PNG chunk parser (A1111, ComfyUI, DrawThings formats) | 982 |
+| `Sources/FolderMetadataReader.swift` | Folder-level metadata fallback (JSON/CFG files) | 279 |
 | `Sources/AppSettings.swift` | UserDefaults-backed settings (app mode only) | 33 |
 | `Sources/WindowReader.swift` | NSView bridges: HostWindowReader, KeyAwareView, KeyHandlingView | 129 |
 | `Sources/PreviewOverlayController.swift` | QuickLook / fullscreen preview controller | 276 |
+| `Sources/PreviewOverlayView.swift` | SwiftUI view for fullscreen preview overlay (controls, layout, sizing) | 336 |
 | `Sources/SafeImageLoader.swift` | Async thumbnail loader with cancellation | 194 |
 
 ---
@@ -111,10 +112,11 @@ private(set) var metadataIndex: MetadataIndex?
 ## ContentView Structure
 
 - **Sidebar** (`var sidebar`) — `List` with filesystem groups + Smart Filters section at bottom. Disabled during search was removed; category clicks now clear search and navigate.
-- **Grid** (`var thumbnailGrid`) — switches on `isSearching` / `selectedCategory` / `hasChosenRoot`. Empty state shown when `!library.hasChosenRoot`.
+- **Grid** (`var thumbnailGrid`) — switches on `isSearching` / `selectedCategory` / `hasChosenRoot`. Empty state shown when `!library.hasChosenRoot`. Accepts file drops via `.onDrop`; `isDropTargeted` drives the drop-target overlay.
 - **Filter bar** (`var filterBar`) — horizontal scroll of `Menu` dropdowns per `MetadataField`. Toggled via `filterBarToggleButton` in grid controls. Shown above grid when active.
-- **Inspector** — right-side panel, toggled via toolbar.
+- **Inspector** — right-side panel, toggled via toolbar. When a file is dragged onto the app (`droppedInspectionImage` set), the inspector shows a `temporaryInspectionBanner` with a "Return to Library" action to clear the temporary view.
 - **Search** — toolbar `TextField`; `handleSearchTextChange` debounces 180ms into async Task; `clearSearch()` wipes state and allows sidebar clicks to navigate; `saveSearchButton` saves query as Smart Filter.
+- **Reveal in Finder** — available via grid thumbnail context menu and inspector toolbar button; calls `NSWorkspace.shared.activateFileViewerSelecting([url])`.
 
 ### Smart Filters Sidebar Section
 
@@ -130,7 +132,8 @@ Rendered as `@ViewBuilder var smartFiltersSidebarSection` — a `Section` with a
 
 ## Known Patterns / Gotchas
 
-- **No welcome sheet** — removed. Empty state in main grid guides first-run.
+- **No welcome sheet** — removed (`WelcomeView.swift` deleted, `isShowingWelcome`/`completeWelcome()` removed from AppSettings). Empty state in main grid guides first-run.
+- **ComfyUI complex workflows** — deeply nested or unsupported node graphs gracefully skip metadata extraction rather than dumping a raw JSON blob. `parseComfyUIPrompt()` returns `nil` for unsupported graph shapes.
 - **`chooseRootFolder` uses `NSOpenPanel.begin(completionHandler:)`** (non-modal) — never use `runModal()`, it conflicts with SwiftUI's sheet teardown.
 - **`KeyHandlingView.activateIfNeeded`** only claims first responder when `window.firstResponder is NSWindow` (nothing focused) — prevents stealing focus mid-click during async re-renders.
 - **`createSchema(db:)` is `static`** — called from actor `init` which is non-isolated; passing the db pointer avoids the Swift 6 actor-isolation warning.
