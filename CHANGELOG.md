@@ -12,6 +12,11 @@
 
 ## Midstream Updates
 
+### 2026-04-22 (`f1d0392..47a4b2b`)
+
+- **Reveal in Finder** — a Reveal in Finder button now appears in the inspector toolbar and in the thumbnail right-click menu, selecting the file in Finder without leaving the app.
+- **Expanded thumbnail context menu** — right-clicking a thumbnail now offers: Open (launches the fullscreen viewer), Add/Remove Favorites (toggles inline, label flips when already set), Reveal in Finder, Copy Image (puts the image on the clipboard), Copy File Path (copies the absolute path as text), and Move to Trash (removes the file and immediately drops it from the grid).
+
 ### 2026-04-21 (`be689d2..f1d0392`)
 
 - **Broader ComfyUI prompt reconstruction** — AiGallery now handles more than the simple "prompt is a single text string" case. It can recover prompts from some linked-node ComfyUI graphs, including concatenated string chains and preview-text-assisted workflows.
