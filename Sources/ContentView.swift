@@ -3,9 +3,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 struct ContentView: View {
-    private static let topLevelFolderTitle = "This Folder"
-
-    @Environment(\.colorScheme) private var colorScheme
+@Environment(\.colorScheme) private var colorScheme
     @EnvironmentObject private var library: LibraryStore
     @AppStorage("showInspector") private var showInspector = true
     @AppStorage("imageSortOrder") private var imageSortOrderRawValue = ImageSortOrder.alphabeticalAscending.rawValue
@@ -364,23 +362,37 @@ struct ContentView: View {
         }
     }
 
+    private func isGroupHeaderActive(_ group: CategoryGroup) -> Bool {
+        guard let selected = library.selectedCategory, selected.rootGroupID == group.id else { return false }
+        return !isGroupExpanded(group.id) || selected.pathParts.count == 1
+    }
+
     private func sidebarGroup(_ group: CategoryGroup, stripeIndex: Int) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
+        let rootCategory = group.categories.first { $0.pathParts.count == 1 }
+        let nodes = sidebarNodes(for: group)
+        let hasChildren = !nodes.isEmpty
+
+        return VStack(alignment: .leading, spacing: 2) {
             Button {
-                toggleGroupExpansion(group.id)
+                if hasChildren { toggleGroupExpansion(group.id) }
+                if let rootCategory { library.selectCategory(rootCategory) }
             } label: {
                 HStack(spacing: 8) {
-                    Image(systemName: isGroupExpanded(group.id) ? "chevron.down" : "chevron.right")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 12)
+                    if hasChildren {
+                        Image(systemName: isGroupExpanded(group.id) ? "chevron.down" : "chevron.right")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 12)
+                    } else {
+                        Color.clear.frame(width: 12)
+                    }
 
                     Text(group.name)
                         .font(.headline)
 
                     Spacer()
 
-                    Text("\(group.categories.count)")
+                    Text("\(group.imageCount)")
                         .foregroundStyle(.secondary)
                 }
                 .padding(.vertical, 4)
@@ -388,13 +400,13 @@ struct ContentView: View {
                 .contentShape(Rectangle())
                 .background(
                     RoundedRectangle(cornerRadius: 8)
-                        .fill(isCollapsedActiveGroup(group) ? Color.accentColor.opacity(0.14) : Color.clear)
+                        .fill(isGroupHeaderActive(group) ? Color.accentColor.opacity(0.14) : Color.clear)
                 )
             }
             .buttonStyle(.plain)
 
-            if isGroupExpanded(group.id) {
-                ForEach(sidebarNodes(for: group)) { node in
+            if hasChildren && isGroupExpanded(group.id) {
+                ForEach(nodes) { node in
                     sidebarNodeRow(node, level: 1)
                 }
             }
@@ -1177,18 +1189,8 @@ struct ContentView: View {
         for category in group.categories {
             let relativePath = Array(category.pathParts.dropFirst())
 
-            if relativePath.isEmpty {
-                nodes.append(
-                    SidebarNode(
-                        id: "\(group.id)/__overview__",
-                        title: Self.topLevelFolderTitle,
-                        pathParts: category.pathParts,
-                        category: category,
-                        children: []
-                    )
-                )
-                continue
-            }
+            // Root category (no relative path) is represented by the group header itself — skip.
+            guard !relativePath.isEmpty else { continue }
 
             insertSidebarNode(
                 category: category,
@@ -1205,12 +1207,7 @@ struct ContentView: View {
         expandedGroupIDs.contains(groupID)
     }
 
-    private func isCollapsedActiveGroup(_ group: CategoryGroup) -> Bool {
-        guard !isGroupExpanded(group.id) else { return false }
-        return library.selectedCategory?.rootGroupID == group.id
-    }
-
-    private func isCollapsedActiveNode(_ node: SidebarNode) -> Bool {
+private func isCollapsedActiveNode(_ node: SidebarNode) -> Bool {
         guard node.hasChildren, !isGroupExpanded(node.id), let selectedCategory = library.selectedCategory else {
             return false
         }
@@ -1293,18 +1290,14 @@ struct ContentView: View {
     }
 
     private func sortSidebarNodes(_ nodes: [SidebarNode]) -> [SidebarNode] {
-        nodes
-            .map { node in
-                var updatedNode = node
-                updatedNode.children = sortSidebarNodes(node.children)
-                return updatedNode
-            }
-            .sorted { lhs, rhs in
-                if lhs.title == Self.topLevelFolderTitle || rhs.title == Self.topLevelFolderTitle {
-                    return lhs.title == Self.topLevelFolderTitle
-                }
-                return lhs.title.localizedCaseInsensitiveCompare(rhs.title) == .orderedAscending
-            }
+        let sorted = nodes.map { node -> SidebarNode in
+            var updated = node
+            updated.children = sortSidebarNodes(node.children)
+            return updated
+        }
+        return sorted.sorted {
+            $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending
+        }
     }
 
     private func displayTitle(for slug: String) -> String {
