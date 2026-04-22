@@ -23,7 +23,7 @@ struct ContentView: View {
     @State private var copiedInspectorResetTask: DispatchWorkItem?
     @State private var savedBrowseSelection: BrowseSelection?
     @State private var searchSelectedImageID: ImageItem.ID?
-    @State private var pendingSearchUpdateTask: DispatchWorkItem?
+    @State private var pendingSearchTask: Task<Void, Never>?
     @State private var activeSearchResults: SearchResult = .empty
     @StateObject private var previewController = PreviewOverlayController()
     @StateObject private var displayImageCache = DisplayImageCache()
@@ -34,6 +34,13 @@ struct ContentView: View {
     @State private var scrollEndNonce = false
     @State private var droppedInspectionImage: ImageItem?
     @State private var isDropTargeted = false
+    @State private var showFilterBar = false
+    @State private var facetValues: [MetadataField: [(value: String, count: Int)]] = [:]
+    @State private var isAddingSmartFilter = false
+    @State private var newSmartFilterName = ""
+    @State private var newSmartFilterQuery = ""
+    @State private var smartFilterRenameID: UUID?
+    @State private var smartFilterRenameDraft = ""
 
     var body: some View {
         NavigationSplitView {
@@ -71,6 +78,7 @@ struct ContentView: View {
                 }
                 .labelStyle(.iconOnly)
                 .help(showInspector ? "Hide Info" : "Show Info")
+
             }
 
             ToolbarItem(placement: .automatic) {
@@ -86,6 +94,12 @@ struct ContentView: View {
         .onChange(of: library.rootURL) { _ in
             clearDroppedInspection()
             clearSearchForRootChange()
+            facetValues = [:]
+        }
+        .onChange(of: library.indexProgress) { progress in
+            if progress >= 1.0 {
+                Task { await loadFacetValues() }
+            }
         }
         .onChange(of: searchText) { newValue in
             handleSearchTextChange(newValue)
@@ -126,6 +140,25 @@ struct ContentView: View {
         )
     }
 
+    private var filterBarToggleButton: some View {
+        let hasActive = !library.activeMetadataFilters.isEmpty
+        let icon = (showFilterBar || hasActive)
+            ? "line.3.horizontal.decrease.circle.fill"
+            : "line.3.horizontal.decrease.circle"
+        return Button {
+            relinquishSearchFocus()
+            showFilterBar.toggle()
+            if showFilterBar && facetValues.isEmpty {
+                Task { await loadFacetValues() }
+            }
+        } label: {
+            Label(showFilterBar ? "Hide Filters" : "Show Filters", systemImage: icon)
+        }
+        .labelStyle(.iconOnly)
+        .help(showFilterBar ? "Hide Filter Bar" : "Show Filter Bar")
+        .foregroundStyle(hasActive ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(Color.primary))
+    }
+
     private var toolbarSearchField: some View {
         HStack(spacing: 8) {
             Image(systemName: "magnifyingglass")
@@ -139,7 +172,7 @@ struct ContentView: View {
                 Button {
                     searchText = ""
                     activeSearchText = ""
-                    pendingSearchUpdateTask?.cancel()
+                    pendingSearchTask?.cancel()
                     isSearchFieldFocused = false
                 } label: {
                     Image(systemName: "xmark.circle.fill")
@@ -168,10 +201,12 @@ struct ContentView: View {
     }
 
     private var sidebar: some View {
-        List {
-            ForEach(Array(library.categoryGroups.enumerated()), id: \.element.id) { index, group in
+        let mainGroups = library.categoryGroups.filter { $0.id != LibraryStore.smartFiltersGroupID }
+        return List {
+            ForEach(Array(mainGroups.enumerated()), id: \.element.id) { index, group in
                 if group.isSynthetic, let category = group.categories.first, group.categories.count == 1 {
-                    categoryRow(category, title: category.name, systemImage: "star.fill")
+                    let icon = group.id == LibraryStore.smartFiltersGroupID ? "line.3.horizontal.decrease.circle" : "star.fill"
+                    categoryRow(category, title: category.name, systemImage: icon)
                         .listRowInsets(EdgeInsets(top: 2, leading: 0, bottom: 2, trailing: 0))
                         .listRowBackground(sidebarStripeFill(for: index))
                         .overlay(alignment: .top) {
@@ -181,6 +216,7 @@ struct ContentView: View {
                     sidebarGroup(group, stripeIndex: index)
                 }
             }
+            smartFiltersSidebarSection
         }
         .overlay {
             if library.isLoading {
@@ -193,8 +229,139 @@ struct ContentView: View {
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
         .background(sidebarPaneBackground)
-        .disabled(isSearching)
         .navigationSplitViewColumnWidth(min: 180, ideal: 260, max: 420)
+    }
+
+    @ViewBuilder
+    private var smartFiltersSidebarSection: some View {
+        let stripeIndex = library.categoryGroups.filter { $0.id != LibraryStore.smartFiltersGroupID }.count
+        Section {
+            ForEach(library.smartFilters) { filter in
+                let categoryID = LibraryStore.smartFilterCategoryID(for: filter.id)
+                let category = library.categories.first { $0.id == categoryID }
+
+                if smartFilterRenameID == filter.id {
+                    // Inline rename field
+                    HStack(spacing: 6) {
+                        TextField("Name", text: $smartFilterRenameDraft)
+                            .textFieldStyle(.plain)
+                            .font(.body)
+                            .onSubmit {
+                                if !smartFilterRenameDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                    library.renameSmartFilter(id: filter.id, name: smartFilterRenameDraft.trimmingCharacters(in: .whitespacesAndNewlines))
+                                }
+                                smartFilterRenameID = nil
+                            }
+                        Button {
+                            smartFilterRenameID = nil
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 6)
+                } else if let category {
+                    categoryRow(category, title: filter.name, systemImage: "line.3.horizontal.decrease.circle")
+                        .contextMenu {
+                            Button("Rename…") {
+                                smartFilterRenameDraft = filter.name
+                                smartFilterRenameID = filter.id
+                            }
+                            Divider()
+                            Button("Delete", role: .destructive) {
+                                library.removeSmartFilter(id: filter.id)
+                            }
+                        }
+                } else {
+                    // Results not yet resolved — show a spinner row
+                    HStack(spacing: 8) {
+                        Image(systemName: "line.3.horizontal.decrease.circle")
+                            .foregroundStyle(.secondary)
+                        Text(filter.name)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        ProgressView().scaleEffect(0.6)
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .contextMenu {
+                        Button("Rename…") {
+                            smartFilterRenameDraft = filter.name
+                            smartFilterRenameID = filter.id
+                        }
+                        Divider()
+                        Button("Delete", role: .destructive) {
+                            library.removeSmartFilter(id: filter.id)
+                        }
+                    }
+                }
+            }
+
+            if isAddingSmartFilter {
+                VStack(alignment: .leading, spacing: 6) {
+                    TextField("Name", text: $newSmartFilterName)
+                        .textFieldStyle(.plain)
+                        .font(.body)
+                    TextField("Query", text: $newSmartFilterQuery)
+                        .textFieldStyle(.plain)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                    HStack {
+                        Button("Add") {
+                            let name = newSmartFilterName.trimmingCharacters(in: .whitespacesAndNewlines)
+                            let query = newSmartFilterQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+                            if !name.isEmpty && !query.isEmpty {
+                                library.addSmartFilter(name: name, query: query)
+                            }
+                            newSmartFilterName = ""
+                            newSmartFilterQuery = ""
+                            isAddingSmartFilter = false
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+                        .disabled(
+                            newSmartFilterName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+                            newSmartFilterQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                        )
+                        Button("Cancel") {
+                            newSmartFilterName = ""
+                            newSmartFilterQuery = ""
+                            isAddingSmartFilter = false
+                        }
+                        .controlSize(.small)
+                    }
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 6)
+            }
+        } header: {
+            HStack {
+                Text("Smart Filters")
+                    .font(.headline)
+                Spacer()
+                Button {
+                    isAddingSmartFilter.toggle()
+                    if isAddingSmartFilter {
+                        newSmartFilterName = ""
+                        newSmartFilterQuery = ""
+                    }
+                } label: {
+                    Image(systemName: isAddingSmartFilter ? "xmark" : "plus")
+                        .imageScale(.small)
+                }
+                .buttonStyle(.plain)
+                .help(isAddingSmartFilter ? "Cancel" : "Add Smart Filter")
+            }
+            .padding(.vertical, 4)
+            .padding(.horizontal, 8)
+        }
+        .listRowInsets(EdgeInsets(top: 2, leading: 0, bottom: 2, trailing: 0))
+        .listRowBackground(sidebarStripeFill(for: stripeIndex))
+        .overlay(alignment: .top) {
+            sidebarGroupDividerOverlay(isVisible: !library.categoryGroups.filter { $0.id != LibraryStore.smartFiltersGroupID }.isEmpty)
+        }
     }
 
     private func sidebarGroup(_ group: CategoryGroup, stripeIndex: Int) -> some View {
@@ -310,7 +477,7 @@ struct ContentView: View {
         isActiveOverride: Bool = false
     ) -> some View {
         Button {
-            guard !isSearching else { return }
+            if isSearching { clearSearch() }
             relinquishSearchFocus()
             clearDroppedInspection()
             library.selectCategory(category)
@@ -350,7 +517,8 @@ struct ContentView: View {
         Group {
             if isSearching {
                 VStack(spacing: 0) {
-                    gridControls(title: "Search Results", subtitle: searchResultsSummary)
+                    gridControls(title: "Search Results", subtitle: searchResultsSummary, showSaveSearch: true)
+                    if showFilterBar { filterBar }
 
                     if displayImages.isEmpty {
                         PlaceholderView(
@@ -365,6 +533,7 @@ struct ContentView: View {
             } else if let category = library.selectedCategory {
                 VStack(spacing: 0) {
                     gridControls(for: category)
+                    if showFilterBar { filterBar }
                     imageGrid(images: displayImages)
                 }
             } else if let errorMessage = library.errorMessage {
@@ -376,6 +545,12 @@ struct ContentView: View {
             } else if library.isLoading {
                 ProgressView()
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if !library.hasChosenRoot {
+                PlaceholderView(
+                    title: "No Library Loaded",
+                    systemImage: "photo.on.rectangle.angled",
+                    description: "Click the folder button above or use File → Choose Image Root to load your images.\nFor TagExplorer-style layouts, enable Legacy Mode from the Mode menu."
+                )
             } else {
                 PlaceholderView(title: "Choose a Category", systemImage: "photo.on.rectangle")
             }
@@ -584,24 +759,43 @@ struct ContentView: View {
         gridControls(title: category.name, subtitle: nil)
     }
 
-    private func gridControls(title: String, subtitle: String?) -> some View {
+    private var saveSearchButton: some View {
+        let alreadySaved = library.smartFilters.contains { $0.query == activeSearchText }
+        return Button {
+            guard !alreadySaved else { return }
+            library.addSmartFilter(name: activeSearchText, query: activeSearchText)
+        } label: {
+            Label("Save Search", systemImage: alreadySaved ? "bookmark.fill" : "bookmark")
+                .labelStyle(.iconOnly)
+        }
+        .help(alreadySaved ? "Already saved as Smart Filter" : "Save as Smart Filter")
+        .disabled(alreadySaved)
+    }
+
+    private func gridControls(title: String, subtitle: String?, showSaveSearch: Bool = false) -> some View {
         ViewThatFits(in: .horizontal) {
             HStack(spacing: 16) {
+                if showSaveSearch { saveSearchButton }
                 categoryHeader(title: title, subtitle: subtitle)
 
                 Spacer(minLength: 12)
 
                 previewButton
+                filterBarToggleButton
                 sortButton
                 thumbnailSizeControl
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
             VStack(alignment: .leading, spacing: 12) {
-                categoryHeader(title: title, subtitle: subtitle)
+                HStack(spacing: 10) {
+                    if showSaveSearch { saveSearchButton }
+                    categoryHeader(title: title, subtitle: subtitle)
+                }
 
                 HStack(spacing: 16) {
                     previewButton
+                    filterBarToggleButton
                     sortButton
                     Spacer(minLength: 8)
                     thumbnailSizeControl
@@ -610,9 +804,13 @@ struct ContentView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
 
             VStack(alignment: .leading, spacing: 12) {
-                categoryHeader(title: title, subtitle: subtitle)
+                HStack(spacing: 10) {
+                    if showSaveSearch { saveSearchButton }
+                    categoryHeader(title: title, subtitle: subtitle)
+                }
 
                 previewButton
+                filterBarToggleButton
                 sortButton
 
                 thumbnailSizeControl
@@ -664,6 +862,96 @@ struct ContentView: View {
                     .truncationMode(.tail)
             }
         }
+    }
+
+    private var filterBar: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                if library.indexProgress < 1.0 {
+                    ProgressView()
+                        .scaleEffect(0.7)
+                        .help("Indexing metadata…")
+                }
+
+                ForEach(MetadataField.allCases, id: \.self) { field in
+                    let values = facetValues[field] ?? []
+                    let active = library.activeMetadataFilters.first { $0.field == field }
+
+                    Menu {
+                        if active != nil {
+                            Button("Clear \(field.displayName)") {
+                                library.removeMetadataFilter(field: field)
+                            }
+                            Divider()
+                        }
+                        ForEach(values, id: \.value) { item in
+                            Button {
+                                library.setMetadataFilter(MetadataFilter(field: field, value: item.value))
+                            } label: {
+                                Text("\(item.value)  (\(item.count))")
+                            }
+                        }
+                        if values.isEmpty {
+                            Text("No values indexed yet")
+                                .foregroundStyle(.secondary)
+                        }
+                    } label: {
+                        HStack(spacing: 4) {
+                            Text(active?.value ?? field.displayName)
+                                .lineLimit(1)
+                            Image(systemName: "chevron.down")
+                                .imageScale(.small)
+                        }
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(
+                            RoundedRectangle(cornerRadius: 6)
+                                .fill(active != nil
+                                    ? Color.accentColor.opacity(0.15)
+                                    : Color(nsColor: .controlBackgroundColor))
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 6)
+                                .stroke(active != nil
+                                    ? Color.accentColor.opacity(0.4)
+                                    : Color.primary.opacity(0.08),
+                                    lineWidth: 1)
+                        )
+                    }
+                    .menuStyle(.borderlessButton)
+                    .fixedSize()
+                }
+
+                if !library.activeMetadataFilters.isEmpty {
+                    Button {
+                        library.clearMetadataFilters()
+                    } label: {
+                        Label("Clear Filters", systemImage: "xmark.circle.fill")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.leading, 4)
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+        }
+        .background(controlStripBackground)
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(controlStripDivider)
+                .frame(height: 1)
+        }
+    }
+
+    private func loadFacetValues() async {
+        guard let index = library.metadataIndex else { return }
+        var result: [MetadataField: [(value: String, count: Int)]] = [:]
+        for field in MetadataField.allCases {
+            result[field] = await index.facetValues(for: field)
+        }
+        facetValues = result
     }
 
     private func imageGrid(images: [ImageItem]) -> some View {
@@ -1108,7 +1396,7 @@ struct ContentView: View {
             )
         }
 
-        pendingSearchUpdateTask?.cancel()
+        pendingSearchTask?.cancel()
 
         if isClearingSearch {
             activeSearchText = ""
@@ -1128,22 +1416,30 @@ struct ContentView: View {
             return
         }
 
-        let updateTask = DispatchWorkItem {
+        pendingSearchTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(180))
+            guard !Task.isCancelled else { return }
             activeSearchText = trimmedValue
-            activeSearchResults = library.searchTags(
+            activeSearchResults = await library.searchWithMetadata(
                 matching: trimmedValue,
                 limit: Self.maximumSearchResults
             )
-
+            guard !Task.isCancelled else { return }
             if let searchSelectedImageID, activeSearchResults.images.contains(where: { $0.id == searchSelectedImageID }) {
                 return
             }
-
             searchSelectedImageID = activeSearchResults.images.first?.id
         }
+    }
 
-        pendingSearchUpdateTask = updateTask
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.18, execute: updateTask)
+    private func clearSearch() {
+        pendingSearchTask?.cancel()
+        savedBrowseSelection = nil   // prevent handleSearchTextChange from restoring old selection
+        activeSearchText = ""
+        activeSearchResults = .empty
+        searchSelectedImageID = nil
+        isSearchFieldFocused = false
+        searchText = ""
     }
 
     private func clearSearchForRootChange() {
@@ -1151,7 +1447,7 @@ struct ContentView: View {
             return
         }
 
-        pendingSearchUpdateTask?.cancel()
+        pendingSearchTask?.cancel()
         searchText = ""
         activeSearchText = ""
         activeSearchResults = .empty
@@ -1173,7 +1469,7 @@ struct ContentView: View {
 
         savedBrowseSelection = nil
         searchSelectedImageID = nil
-        pendingSearchUpdateTask?.cancel()
+        pendingSearchTask?.cancel()
         activeSearchResults = .empty
     }
 

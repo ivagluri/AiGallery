@@ -40,7 +40,7 @@ actor MetadataIndex {
         sqlite3_exec(opened, "PRAGMA journal_mode=WAL;", nil, nil, nil)
         sqlite3_exec(opened, "PRAGMA synchronous=NORMAL;", nil, nil, nil)
 
-        try createSchema()
+        try Self.createSchema(db: opened)
     }
 
     deinit {
@@ -73,8 +73,8 @@ actor MetadataIndex {
 
         let upsertSQL = """
         INSERT OR REPLACE INTO indexed_images
-        (path,mod_date,model,sampler,scheduler,vae,upscaler,steps,cfg,strength,width,height,source_fmt)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+        (path,mod_date,model,sampler,scheduler,vae,upscaler,steps,cfg,strength,width,height,source_fmt,prompt,negative_prompt)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """
         var upsert: OpaquePointer?
         guard sqlite3_prepare_v2(db, upsertSQL, -1, &upsert, nil) == SQLITE_OK else { return }
@@ -178,24 +178,47 @@ actor MetadataIndex {
         return paths
     }
 
+    func imagePathsWherePromptContains(_ query: String) -> Set<String> {
+        guard let db else { return [] }
+        let escaped = query
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "%",  with: "\\%")
+            .replacingOccurrences(of: "_",  with: "\\_")
+        let pattern = "%\(escaped)%"
+        let sql = "SELECT path FROM indexed_images WHERE prompt LIKE ? ESCAPE '\\' OR negative_prompt LIKE ? ESCAPE '\\'"
+        var stmt: OpaquePointer?
+        var paths = Set<String>()
+        if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
+            sqlite3_bind_text(stmt, 1, pattern, -1, SQLITE_TRANSIENT)
+            sqlite3_bind_text(stmt, 2, pattern, -1, SQLITE_TRANSIENT)
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                paths.insert(String(cString: sqlite3_column_text(stmt, 0)))
+            }
+        }
+        sqlite3_finalize(stmt)
+        return paths
+    }
+
     // MARK: - Private
 
-    private func createSchema() throws {
+    private static func createSchema(db: OpaquePointer) throws {
         let ddl = """
         CREATE TABLE IF NOT EXISTS indexed_images (
-            path       TEXT    PRIMARY KEY,
-            mod_date   REAL    NOT NULL,
-            model      TEXT,
-            sampler    TEXT,
-            scheduler  TEXT,
-            vae        TEXT,
-            upscaler   TEXT,
-            steps      INTEGER,
-            cfg        REAL,
-            strength   REAL,
-            width      INTEGER,
-            height     INTEGER,
-            source_fmt TEXT
+            path            TEXT    PRIMARY KEY,
+            mod_date        REAL    NOT NULL,
+            model           TEXT,
+            sampler         TEXT,
+            scheduler       TEXT,
+            vae             TEXT,
+            upscaler        TEXT,
+            steps           INTEGER,
+            cfg             REAL,
+            strength        REAL,
+            width           INTEGER,
+            height          INTEGER,
+            source_fmt      TEXT,
+            prompt          TEXT,
+            negative_prompt TEXT
         );
         CREATE INDEX IF NOT EXISTS idx_model     ON indexed_images(model);
         CREATE INDEX IF NOT EXISTS idx_sampler   ON indexed_images(sampler);
@@ -208,6 +231,13 @@ actor MetadataIndex {
             sqlite3_free(errmsg)
             throw MetadataIndexError.schemaSetupFailed(msg)
         }
+        // Migration: add columns if they don't exist yet.
+        // If a column was just added, zero mod_date on all rows so the next scan re-indexes
+        // them and populates the new field (existing rows otherwise have NULL and won't match).
+        if sqlite3_exec(db, "ALTER TABLE indexed_images ADD COLUMN prompt TEXT", nil, nil, nil) == SQLITE_OK {
+            sqlite3_exec(db, "UPDATE indexed_images SET mod_date = 0", nil, nil, nil)
+        }
+        sqlite3_exec(db, "ALTER TABLE indexed_images ADD COLUMN negative_prompt TEXT", nil, nil, nil)
     }
 
     private func removePaths(_ paths: Set<String>) {
@@ -237,6 +267,8 @@ actor MetadataIndex {
         var width: Int?
         var height: Int?
         var sourceFmt: String?
+        var prompt: String?
+        var negativePrompt: String?
     }
 
     private static func extractRow(for image: ImageItem, modDate: Double) -> IndexRow {
@@ -292,10 +324,16 @@ actor MetadataIndex {
             if parts.count == 2 { width = Int(parts[0]); height = Int(parts[1]) }
         }
 
+        let prompt = (pngMeta?.prompt ?? folderMeta?.prompt)
+            .flatMap { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+        let negativePrompt = (pngMeta?.negativePrompt ?? folderMeta?.negativePrompt)
+            .flatMap { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+
         return IndexRow(
             modDate: modDate, model: model, sampler: sampler, scheduler: scheduler,
             vae: vae, upscaler: upscaler, steps: steps, cfg: cfg, strength: strength,
-            width: width, height: height, sourceFmt: fmt
+            width: width, height: height, sourceFmt: fmt,
+            prompt: prompt, negativePrompt: negativePrompt
         )
     }
 
@@ -382,6 +420,8 @@ actor MetadataIndex {
         bindInt            (stmt, 11, row.width)
         bindInt            (stmt, 12, row.height)
         bindText           (stmt, 13, row.sourceFmt)
+        bindText           (stmt, 14, row.prompt)
+        bindText           (stmt, 15, row.negativePrompt)
     }
 
     private static func bindText(_ s: OpaquePointer, _ i: Int32, _ v: String?) {

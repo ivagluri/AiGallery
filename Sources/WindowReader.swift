@@ -97,10 +97,15 @@ final class KeyHandlingView: NSView {
                 let self,
                 let coordinator = self.coordinator,
                 coordinator.isActive,
-                !(self.window?.firstResponder is NSTextView)
+                self.window?.attachedSheet == nil,
+                NSApp.modalWindow == nil
             else {
                 return
             }
+            // Only claim first responder when no interactive control has it.
+            // If a button or text field currently holds focus, leave it alone.
+            let fr = self.window?.firstResponder
+            guard fr == nil || fr is NSWindow else { return }
 
             self.window?.makeFirstResponder(self)
         }

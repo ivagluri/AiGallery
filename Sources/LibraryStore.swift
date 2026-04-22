@@ -19,14 +19,29 @@ final class LibraryStore: ObservableObject {
     private var favoriteImageIDs: Set<String>
     private var reloadTask: Task<Void, Never>?
     private var indexScanTask: Task<Void, Never>?
+    private var filterTask: Task<Void, Never>?
     private(set) var metadataIndex: MetadataIndex?
     @Published var indexProgress: Double = 0
+    @Published var activeMetadataFilters: [MetadataFilter] = []
+    @Published private(set) var hasChosenRoot: Bool = false
+    private var filteredImagePaths: Set<String> = []
+    @Published var smartFilters: [SmartFilter] = []
+    private var smartFilterResults: [UUID: [ImageItem]] = [:]
+    private var smartFilterTask: Task<Void, Never>?
+
     private static let rootURLDefaultsKey = "selectedRootURL"
     private static let selectedCategoryDefaultsKey = "selectedCategoryID"
     private static let favoriteImageIDsDefaultsKey = "favoriteImageIDsByRoot"
     private static let legacyFavoriteImageIDsDefaultsKey = "favoriteImageIDs"
+    private static let smartFiltersDefaultsKey = "smartFiltersByRoot"
     private static let rootCategoryID = "__root__"
     private static let favoritesID = "__favorites__"
+    private static let filteredID = "__filtered__"
+    static let smartFiltersGroupID = "__smart_filters__"
+
+    static func smartFilterCategoryID(for filterID: UUID) -> String {
+        "__smart_\(filterID.uuidString)__"
+    }
 
     init(appSettings: AppSettings, userDefaults: UserDefaults = .standard) {
         self.appSettings = appSettings
@@ -41,6 +56,9 @@ final class LibraryStore: ObservableObject {
         self.selectedCategoryID = userDefaults.string(forKey: Self.selectedCategoryDefaultsKey)
         self.favoriteImageIDs = []
         self.favoriteImageIDs = loadFavoriteImageIDs(for: self.rootURL)
+
+        self.hasChosenRoot = defaultRootURL != nil
+        self.smartFilters = Self.loadSmartFilters(for: self.rootURL, userDefaults: userDefaults)
 
         if defaultRootURL != nil {
             // Synchronous on init so the window only appears once content is ready.
@@ -174,6 +192,26 @@ final class LibraryStore: ObservableObject {
         selectedImageID = Self.validImageID(current: selectedImageID, categories: categories, selectedCategoryID: selectedCategoryID)
     }
 
+    func setMetadataFilter(_ filter: MetadataFilter) {
+        activeMetadataFilters.removeAll { $0.field == filter.field }
+        activeMetadataFilters.append(filter)
+        applyMetadataFilters()
+    }
+
+    func removeMetadataFilter(field: MetadataField) {
+        activeMetadataFilters.removeAll { $0.field == field }
+        applyMetadataFilters()
+    }
+
+    func clearMetadataFilters() {
+        activeMetadataFilters = []
+        filteredImagePaths = []
+        filterTask?.cancel()
+        rebuildCategories()
+        selectedCategoryID = Self.validCategoryID(current: selectedCategoryID, categories: categories)
+        persistSelectedCategoryID(selectedCategoryID)
+    }
+
     func pngInfo(for image: ImageItem) -> ImageMetadata? {
         if let cached = pngInfoCache[image.id] {
             return cached
@@ -217,8 +255,7 @@ final class LibraryStore: ObservableObject {
         return Self.makeImageItem(from: fileURL, profile: Self.profile(for: appSettings.appMode))
     }
 
-    @discardableResult
-    func chooseRootFolder() -> Bool {
+    func chooseRootFolder(completion: ((Bool) -> Void)? = nil) {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
@@ -226,19 +263,66 @@ final class LibraryStore: ObservableObject {
         panel.prompt = "Open"
         panel.message = "Choose the folder that contains your image folders or nested category folders."
 
-        if panel.runModal() == .OK, let url = panel.url {
-            rootURL = url
-            persistRootURL(url)
-            favoriteImageIDs = loadFavoriteImageIDs(for: url)
-            reload()
-            return true
+        panel.begin { [weak self] result in
+            guard let self else { return }
+            if result == .OK, let url = panel.url {
+                self.rootURL = url
+                self.hasChosenRoot = true
+                self.persistRootURL(url)
+                self.favoriteImageIDs = self.loadFavoriteImageIDs(for: url)
+                self.smartFilters = Self.loadSmartFilters(for: url, userDefaults: self.userDefaults)
+                self.smartFilterResults = [:]
+                self.reload()
+                completion?(true)
+            } else {
+                completion?(false)
+            }
         }
-
-        return false
     }
 
     func searchTags(matching query: String, limit: Int) -> SearchResult {
         Self.profile(for: appSettings.appMode).search(matching: query, in: searchIndex, limit: limit)
+    }
+
+    func searchWithMetadata(matching query: String, limit: Int) async -> SearchResult {
+        let filenameResult = searchTags(matching: query, limit: limit)
+
+        guard let index = metadataIndex else { return filenameResult }
+
+        // Parse into terms (respects "quoted phrases") and AND them on the metadata side.
+        let terms = parseSearchTerms(query)
+        guard !terms.isEmpty else { return filenameResult }
+
+        // For each term, collect all paths that match any metadata field or prompt.
+        // Then intersect across terms so only images matching ALL terms are included.
+        var metadataPaths: Set<String>? = nil
+        for term in terms {
+            var termPaths = Set<String>()
+            for field in MetadataField.allCases {
+                let paths = await index.imagePaths(where: field, contains: term)
+                termPaths.formUnion(paths)
+            }
+            let promptPaths = await index.imagePathsWherePromptContains(term)
+            termPaths.formUnion(promptPaths)
+
+            if var accumulated = metadataPaths {
+                accumulated.formIntersection(termPaths)
+                metadataPaths = accumulated
+            } else {
+                metadataPaths = termPaths
+            }
+        }
+
+        let filenamePathSet = Set(filenameResult.images.map(\.id))
+        let newMetadataPaths = (metadataPaths ?? []).subtracting(filenamePathSet)
+        guard !newMetadataPaths.isEmpty else { return filenameResult }
+
+        let metadataImages = searchIndex.filter { newMetadataPaths.contains($0.id) }
+        let combined = filenameResult.images + metadataImages
+        return SearchResult(
+            images: Array(combined.prefix(limit)),
+            totalMatches: filenameResult.totalMatches + metadataImages.count
+        )
     }
 
     func setAppMode(_ mode: AppMode) {
@@ -268,9 +352,15 @@ final class LibraryStore: ObservableObject {
 
         reloadTask?.cancel()
         indexScanTask?.cancel()
+        filterTask?.cancel()
+        smartFilterTask?.cancel()
         indexScanTask = nil
+        filterTask = nil
+        smartFilterTask = nil
         metadataIndex = nil
         indexProgress = 0
+        activeMetadataFilters = []
+        filteredImagePaths = []
         rootURL = fileManager.homeDirectoryForCurrentUser
         favoriteImageIDs = loadFavoriteImageIDs(for: rootURL)
         pngInfoCache.removeAll()
@@ -318,6 +408,94 @@ final class LibraryStore: ObservableObject {
         return merged
     }
 
+    private func applyMetadataFilters() {
+        filterTask?.cancel()
+        guard !activeMetadataFilters.isEmpty, let index = metadataIndex else {
+            filteredImagePaths = []
+            rebuildCategories()
+            selectedCategoryID = Self.validCategoryID(current: selectedCategoryID, categories: categories)
+            persistSelectedCategoryID(selectedCategoryID)
+            return
+        }
+        let filters = activeMetadataFilters
+        filterTask = Task {
+            let paths = await index.imagePaths(matching: filters)
+            guard !Task.isCancelled else { return }
+            await MainActor.run { [weak self] in
+                guard let self else { return }
+                self.filteredImagePaths = paths
+                self.rebuildCategories()
+                self.selectedCategoryID = Self.validCategoryID(
+                    current: Self.filteredID,
+                    categories: self.categories
+                )
+                self.persistSelectedCategoryID(self.selectedCategoryID)
+            }
+        }
+    }
+
+    // MARK: - Smart Filters
+
+    func addSmartFilter(name: String, query: String) {
+        let filter = SmartFilter(name: name, query: query)
+        smartFilters.append(filter)
+        persistSmartFilters()
+        smartFilterTask?.cancel()
+        smartFilterTask = Task { await resolveSmartFilters() }
+    }
+
+    func removeSmartFilter(id: UUID) {
+        smartFilters.removeAll { $0.id == id }
+        smartFilterResults.removeValue(forKey: id)
+        persistSmartFilters()
+        rebuildCategories()
+    }
+
+    func renameSmartFilter(id: UUID, name: String) {
+        guard let idx = smartFilters.firstIndex(where: { $0.id == id }) else { return }
+        smartFilters[idx].name = name
+        persistSmartFilters()
+        rebuildCategories()
+    }
+
+    private func persistSmartFilters() {
+        var byRoot = userDefaults.dictionary(forKey: Self.smartFiltersDefaultsKey) as? [String: Data] ?? [:]
+        let key = Self.favoriteImageIDsStorageKey(for: rootURL)
+        byRoot[key] = try? JSONEncoder().encode(smartFilters)
+        userDefaults.set(byRoot, forKey: Self.smartFiltersDefaultsKey)
+    }
+
+    private static func loadSmartFilters(for rootURL: URL, userDefaults: UserDefaults) -> [SmartFilter] {
+        let key = favoriteImageIDsStorageKey(for: rootURL)
+        guard
+            let byRoot = userDefaults.dictionary(forKey: smartFiltersDefaultsKey) as? [String: Data],
+            let data = byRoot[key],
+            let filters = try? JSONDecoder().decode([SmartFilter].self, from: data)
+        else { return [] }
+        return filters
+    }
+
+    private func resolveSmartFilters() async {
+        let filters = smartFilters
+        guard !filters.isEmpty else { return }
+
+        var newResults: [UUID: [ImageItem]] = [:]
+        for filter in filters {
+            let result = await searchWithMetadata(matching: filter.query, limit: 10_000)
+            newResults[filter.id] = result.images
+        }
+
+        let resolvedResults = newResults
+        await MainActor.run { [weak self] in
+            guard let self else { return }
+            self.smartFilterResults = resolvedResults
+            self.rebuildCategories()
+            self.selectedCategoryID = Self.validCategoryID(
+                current: self.selectedCategoryID, categories: self.categories
+            )
+        }
+    }
+
     private func startBackgroundIndexing() {
         indexScanTask?.cancel()
         let images = searchIndex
@@ -333,6 +511,8 @@ final class LibraryStore: ObservableObject {
                 await index.scan(images: images) { @Sendable [weak self] progress in
                     Task { @MainActor [weak self] in self?.indexProgress = progress }
                 }
+                guard !Task.isCancelled else { return }
+                await resolveSmartFilters()
             } catch {
                 // Indexing is a best-effort enhancement; the app works fine without it.
             }
@@ -345,24 +525,61 @@ final class LibraryStore: ObservableObject {
             .filter { favoriteImageIDs.contains($0.id) }
             .sorted { $0.displayLabel.localizedCaseInsensitiveCompare($1.displayLabel) == .orderedAscending }
 
-        if favoriteImages.isEmpty {
-            categories = sourceCategories
-            return
+        var syntheticCategories: [Category] = []
+
+        if !filteredImagePaths.isEmpty {
+            let filteredImages = sourceCategories
+                .flatMap(\.images)
+                .filter { filteredImagePaths.contains($0.id) }
+                .sorted { $0.displayLabel.localizedCaseInsensitiveCompare($1.displayLabel) == .orderedAscending }
+
+            if !filteredImages.isEmpty {
+                syntheticCategories.append(Category(
+                    id: Self.filteredID,
+                    name: "Filtered",
+                    shortName: "Filtered",
+                    pathParts: ["Filtered"],
+                    rootGroupID: Self.filteredID,
+                    rootGroupName: "Filtered",
+                    folderURL: rootURL,
+                    images: filteredImages,
+                    isSynthetic: true
+                ))
+            }
         }
 
-        let favoritesCategory = Category(
-            id: Self.favoritesID,
-            name: "Favorites",
-            shortName: "Saved Images",
-            pathParts: ["Favorites"],
-            rootGroupID: Self.favoritesID,
-            rootGroupName: "Favorites",
-            folderURL: rootURL,
-            images: favoriteImages,
-            isSynthetic: true
-        )
+        if !favoriteImages.isEmpty {
+            syntheticCategories.append(Category(
+                id: Self.favoritesID,
+                name: "Favorites",
+                shortName: "Saved Images",
+                pathParts: ["Favorites"],
+                rootGroupID: Self.favoritesID,
+                rootGroupName: "Favorites",
+                folderURL: rootURL,
+                images: favoriteImages,
+                isSynthetic: true
+            ))
+        }
 
-        categories = [favoritesCategory] + sourceCategories
+        // Smart filter synthetic categories (one per filter that has resolved results)
+        var smartCategories: [Category] = []
+        for filter in smartFilters {
+            let images = smartFilterResults[filter.id] ?? []
+            smartCategories.append(Category(
+                id: Self.smartFilterCategoryID(for: filter.id),
+                name: filter.name,
+                shortName: filter.name,
+                pathParts: [filter.name],
+                rootGroupID: Self.smartFiltersGroupID,
+                rootGroupName: "Smart Filters",
+                folderURL: rootURL,
+                images: images,
+                isSynthetic: true
+            ))
+        }
+
+        categories = syntheticCategories + smartCategories + sourceCategories
     }
 
     private func pruneFavoritesToExistingImages() {

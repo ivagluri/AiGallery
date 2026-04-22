@@ -12,6 +12,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidBecomeActive(_ notification: Notification) {
+        guard NSApp.modalWindow == nil, NSApp.keyWindow == nil else { return }
         NSApp.windows.first { $0.canBecomeKey }?.makeKeyAndOrderFront(nil)
     }
 }
@@ -34,16 +35,6 @@ struct AiGalleryApp: App {
                 .environmentObject(library)
                 .environmentObject(settings)
                 .frame(minWidth: 900, minHeight: 640)
-                .sheet(
-                    isPresented: Binding(
-                        get: { settings.isShowingWelcome },
-                        set: { settings.isShowingWelcome = $0 }
-                    )
-                ) {
-                    WelcomeView()
-                        .environmentObject(library)
-                        .environmentObject(settings)
-                }
         }
         .defaultSize(width: 1500, height: 920)
         .windowStyle(.titleBar)

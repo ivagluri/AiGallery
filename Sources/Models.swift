@@ -76,6 +76,18 @@ enum MetadataField: String, CaseIterable {
     var columnName: String { rawValue }
 }
 
+struct SmartFilter: Identifiable, Codable, Hashable {
+    var id: UUID
+    var name: String
+    var query: String
+
+    init(id: UUID = UUID(), name: String, query: String) {
+        self.id = id
+        self.name = name
+        self.query = query
+    }
+}
+
 struct MetadataFilter: Identifiable, Hashable {
     let id: UUID
     let field: MetadataField
