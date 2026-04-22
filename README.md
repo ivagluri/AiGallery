@@ -5,9 +5,7 @@ It started out as a way to browse TagExplorer.github.io-style sample folders, bu
 
 ## Screenshot
 
-Replace this with a current screenshot after the UI refresh.
-
-![AiGallery screenshot](screenshot2.png)
+![AiGallery screenshot](screenshot3.png)
 
 ## What It Does
 
