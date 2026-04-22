@@ -679,16 +679,29 @@ struct ContentView: View {
                 Spacer(minLength: 0)
             }
 
-            Button {
-                copyInspectorValue(image.fileURL.path)
-            } label: {
-                Image(systemName: copiedInspectorValue == image.fileURL.path ? "checkmark" : "doc.on.doc")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(copiedInspectorValue == image.fileURL.path ? Color.accentColor : Color.secondary)
-                    .frame(width: 24, height: 24)
+            HStack(spacing: 4) {
+                Button {
+                    revealInFinder(image.fileURL)
+                } label: {
+                    Image(systemName: "folder")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(Color.secondary)
+                        .frame(width: 24, height: 24)
+                }
+                .buttonStyle(.plain)
+                .help("Reveal in Finder")
+
+                Button {
+                    copyInspectorValue(image.fileURL.path)
+                } label: {
+                    Image(systemName: copiedInspectorValue == image.fileURL.path ? "checkmark" : "doc.on.doc")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(copiedInspectorValue == image.fileURL.path ? Color.accentColor : Color.secondary)
+                        .frame(width: 24, height: 24)
+                }
+                .buttonStyle(.plain)
+                .help("Copy Path")
             }
-            .buttonStyle(.plain)
-            .help("Copy Path")
         }
         .frame(height: 38)
         .padding(.horizontal, 12)
@@ -2310,6 +2323,14 @@ private struct ThumbnailCell: View {
         .onTapGesture {
             onSelect()
         }
+        .contextMenu {
+            Button {
+                onSelect()
+                revealInFinder()
+            } label: {
+                Label("Reveal in Finder", systemImage: "finder")
+            }
+        }
         .simultaneousGesture(
             TapGesture(count: 2)
                 .onEnded {
@@ -2346,6 +2367,10 @@ private struct ThumbnailCell: View {
             green: 218.0 / 255.0,
             blue: 107.0 / 255.0
         )
+    }
+
+    private func revealInFinder() {
+        NSWorkspace.shared.activateFileViewerSelecting([image.fileURL])
     }
 }
 
@@ -2517,9 +2542,13 @@ private struct PromptDisclosureBlock: View {
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
     }
-}
+
+    private func revealInFinder(_ url: URL) {
+        NSWorkspace.shared.activateFileViewerSelecting([url])
+    }
 
 private struct ThumbnailImage: View {
     let imageURL: URL
