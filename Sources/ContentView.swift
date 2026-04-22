@@ -1008,6 +1008,9 @@ struct ContentView: View {
                                 },
                                 onToggleFavorite: {
                                     library.toggleFavorite(image)
+                                },
+                                onTrash: {
+                                    library.trashImage(image)
                                 }
                             )
                         }
@@ -2276,6 +2279,7 @@ private struct ThumbnailCell: View {
     let onSelect: () -> Void
     let onOpenPreview: () -> Void
     let onToggleFavorite: () -> Void
+    let onTrash: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -2326,9 +2330,58 @@ private struct ThumbnailCell: View {
         .contextMenu {
             Button {
                 onSelect()
+                onOpenPreview()
+            } label: {
+                Label("Open", systemImage: "photo")
+            }
+
+            Divider()
+
+            Button {
+                onSelect()
+                onToggleFavorite()
+            } label: {
+                Label(
+                    isFavorite ? "Remove from Favorites" : "Add to Favorites",
+                    systemImage: isFavorite ? "star.fill" : "star"
+                )
+            }
+
+            Divider()
+
+            Button {
+                onSelect()
                 revealInFinder()
             } label: {
                 Label("Reveal in Finder", systemImage: "finder")
+            }
+
+            Divider()
+
+            Button {
+                onSelect()
+                if let nsImage = NSImage(contentsOf: image.fileURL) {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.writeObjects([nsImage])
+                }
+            } label: {
+                Label("Copy Image", systemImage: "doc.on.doc")
+            }
+
+            Button {
+                onSelect()
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(image.fileURL.path, forType: .string)
+            } label: {
+                Label("Copy File Path", systemImage: "doc.on.clipboard")
+            }
+
+            Divider()
+
+            Button(role: .destructive) {
+                onTrash()
+            } label: {
+                Label("Move to Trash", systemImage: "trash")
             }
         }
         .simultaneousGesture(

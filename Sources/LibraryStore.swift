@@ -192,6 +192,29 @@ final class LibraryStore: ObservableObject {
         selectedImageID = Self.validImageID(current: selectedImageID, categories: categories, selectedCategoryID: selectedCategoryID)
     }
 
+    func trashImage(_ image: ImageItem) {
+        try? FileManager.default.trashItem(at: image.fileURL, resultingItemURL: nil)
+        sourceCategories = sourceCategories.map { cat in
+            Category(
+                id: cat.id,
+                name: cat.name,
+                shortName: cat.shortName,
+                pathParts: cat.pathParts,
+                rootGroupID: cat.rootGroupID,
+                rootGroupName: cat.rootGroupName,
+                folderURL: cat.folderURL,
+                images: cat.images.filter { $0.id != image.id },
+                isSynthetic: cat.isSynthetic
+            )
+        }
+        favoriteImageIDs.remove(image.id)
+        persistFavoriteImageIDs()
+        rebuildCategories()
+        selectedCategoryID = Self.validCategoryID(current: selectedCategoryID, categories: categories)
+        persistSelectedCategoryID(selectedCategoryID)
+        selectedImageID = Self.validImageID(current: selectedImageID, categories: categories, selectedCategoryID: selectedCategoryID)
+    }
+
     func setMetadataFilter(_ filter: MetadataFilter) {
         activeMetadataFilters.removeAll { $0.field == filter.field }
         activeMetadataFilters.append(filter)
