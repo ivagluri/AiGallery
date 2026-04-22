@@ -701,6 +701,17 @@ struct ContentView: View {
                 }
                 .buttonStyle(.plain)
                 .help("Copy Path")
+
+                Button {
+                    library.trashImage(image)
+                } label: {
+                    Image(systemName: "trash")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(Color.red.opacity(0.7))
+                        .frame(width: 24, height: 24)
+                }
+                .buttonStyle(.plain)
+                .help("Move to Trash")
             }
         }
         .frame(height: 38)
@@ -1512,7 +1523,10 @@ private func isCollapsedActiveNode(_ node: SidebarNode) -> Bool {
 
         if let previewEventResult = handlePreviewHotkey(event) {
             if let favoriteEventResult = handleFavoriteHotkey(previewEventResult) {
-                return handleNavigationHotkey(favoriteEventResult) == nil
+                if let trashEventResult = handleTrashHotkey(favoriteEventResult) {
+                    return handleNavigationHotkey(trashEventResult) == nil
+                }
+                return true
             }
 
             return true
@@ -1535,6 +1549,7 @@ private func isCollapsedActiveNode(_ node: SidebarNode) -> Bool {
         }
 
         return isFavoriteHotkey(event) && shouldHandleFavoriteHotkey(event)
+            || event.keyCode == 51 && shouldHandleTrashHotkey(event)
     }
 
     private func handlePreviewHotkey(_ event: NSEvent) -> NSEvent? {
@@ -1631,6 +1646,31 @@ private func isCollapsedActiveNode(_ node: SidebarNode) -> Bool {
     }
 
     private func shouldHandleFavoriteHotkey(_ event: NSEvent) -> Bool {
+        guard displayedSelectedImage != nil, !isInspectingDroppedImage else {
+            return false
+        }
+
+        let disallowedModifiers = event.modifierFlags.intersection([.command, .control, .option])
+        guard disallowedModifiers.isEmpty else {
+            return false
+        }
+
+        return !isSearchFieldFocused && !(hostWindow?.firstResponder is NSTextView)
+    }
+
+    private func handleTrashHotkey(_ event: NSEvent) -> NSEvent? {
+        guard event.keyCode == 51, shouldHandleTrashHotkey(event) else {
+            return event
+        }
+
+        if let image = displayedSelectedImage {
+            library.trashImage(image)
+        }
+
+        return nil
+    }
+
+    private func shouldHandleTrashHotkey(_ event: NSEvent) -> Bool {
         guard displayedSelectedImage != nil, !isInspectingDroppedImage else {
             return false
         }

@@ -46,6 +46,17 @@ struct AiGalleryApp: App {
                 .keyboardShortcut("o")
             }
 
+            CommandMenu("Image") {
+                Button("Move to Trash") {
+                    guard let id = library.selectedImageID,
+                          let image = library.allImages.first(where: { $0.id == id })
+                    else { return }
+                    library.trashImage(image)
+                }
+                .keyboardShortcut(.delete)
+                .disabled(library.selectedImageID == nil)
+            }
+
             CommandMenu("Mode") {
                 Toggle(
                     "TagExplorer Legacy Mode",
