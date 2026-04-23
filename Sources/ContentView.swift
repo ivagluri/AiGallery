@@ -61,12 +61,12 @@ struct ContentView: View {
 
                 Button {
                     relinquishSearchFocus()
-                    library.chooseRootFolder()
+                    library.addRootFolder()
                 } label: {
-                    Label("Choose Folder", systemImage: "folder")
+                    Label("Add Folder", systemImage: "folder.badge.plus")
                 }
                 .labelStyle(.iconOnly)
-                .help("Choose Image Root")
+                .help("Add Root Folder")
 
                 Button {
                     relinquishSearchFocus()
@@ -86,13 +86,23 @@ struct ContentView: View {
         .onAppear {
             expandAllGroupsIfNeeded()
         }
-        .onChange(of: library.categoryGroups.map(\.id)) { _ in
+        .onChange(of: library.loadedRootURLs) { _ in
             expandAllGroupsIfNeeded()
         }
-        .onChange(of: library.rootURL) { _ in
+        .onChange(of: library.rootURLs) { _ in
             clearDroppedInspection()
-            clearSearchForRootChange()
             facetValues = [:]
+            // Re-run active search so results from a removed root are evicted.
+            let query = trimmedActiveSearchText
+            if !query.isEmpty {
+                pendingSearchTask?.cancel()
+                pendingSearchTask = Task { @MainActor in
+                    activeSearchResults = await library.searchWithMetadata(
+                        matching: query,
+                        limit: Self.maximumSearchResults
+                    )
+                }
+            }
         }
         .onChange(of: library.indexProgress) { progress in
             if progress >= 1.0 {
@@ -364,46 +374,72 @@ struct ContentView: View {
 
     private func isGroupHeaderActive(_ group: CategoryGroup) -> Bool {
         guard let selected = library.selectedCategory, selected.rootGroupID == group.id else { return false }
-        return !isGroupExpanded(group.id) || selected.pathParts.count == 1
+        return selected.folderURL.standardizedFileURL == selected.sourceRootURL?.standardizedFileURL
     }
 
     private func sidebarGroup(_ group: CategoryGroup, stripeIndex: Int) -> some View {
-        let rootCategory = group.categories.first { $0.pathParts.count == 1 }
+        let rootCategory = group.categories.first {
+            $0.folderURL.standardizedFileURL == $0.sourceRootURL?.standardizedFileURL
+        }
         let nodes = sidebarNodes(for: group)
         let hasChildren = !nodes.isEmpty
-
+        let isLoadingRoot = group.sourceRootURL.map { library.loadingRootURLs.contains($0) } ?? false
+        let isUnloaded = !group.isSynthetic && group.categories.isEmpty && !isLoadingRoot
+            && (group.sourceRootURL.map { !library.loadedRootURLs.contains($0) } ?? false)
         return VStack(alignment: .leading, spacing: 2) {
-            Button {
-                if hasChildren { toggleGroupExpansion(group.id) }
-                if let rootCategory { library.selectCategory(rootCategory) }
-            } label: {
-                HStack(spacing: 8) {
-                    if hasChildren {
-                        Image(systemName: isGroupExpanded(group.id) ? "chevron.down" : "chevron.right")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                            .frame(width: 12)
-                    } else {
-                        Color.clear.frame(width: 12)
+            HStack(spacing: 0) {
+                // Chevron — expand/collapse only
+                Button {
+                    guard !isLoadingRoot else { return }
+                    toggleGroupExpansion(group.id)
+                    if isUnloaded, isGroupExpanded(group.id), let rootURL = group.sourceRootURL {
+                        library.loadRoot(rootURL)
                     }
-
-                    Text(group.name)
-                        .font(.headline)
-
-                    Spacer()
-
-                    Text("\(group.imageCount)")
-                        .foregroundStyle(.secondary)
+                } label: {
+                    Group {
+                        if isLoadingRoot {
+                            ProgressView().scaleEffect(0.6)
+                        } else {
+                            Image(systemName: isGroupExpanded(group.id) ? "chevron.down" : "chevron.right")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .frame(width: 12, height: 12)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .contentShape(Rectangle())
                 }
-                .padding(.vertical, 4)
-                .padding(.horizontal, 8)
-                .contentShape(Rectangle())
-                .background(
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(isGroupHeaderActive(group) ? Color.accentColor.opacity(0.14) : Color.clear)
-                )
+                .buttonStyle(.plain)
+
+                // Title — navigate only
+                Button {
+                    if isUnloaded, let rootURL = group.sourceRootURL {
+                        if !isGroupExpanded(group.id) { toggleGroupExpansion(group.id) }
+                        library.loadRoot(rootURL)
+                    }
+                    if let rootCategory { library.selectCategory(rootCategory) }
+                } label: {
+                    HStack(spacing: 8) {
+                        Text(group.name)
+                            .font(.headline)
+                        Spacer()
+                        if !isLoadingRoot {
+                            Text("\(group.imageCount)")
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .padding(.vertical, 4)
+                    .padding(.trailing, 8)
+                    .contentShape(Rectangle())
+                    .background(
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(isGroupHeaderActive(group) ? Color.accentColor.opacity(0.14) : Color.clear)
+                    )
+                }
+                .buttonStyle(.plain)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .buttonStyle(.plain)
 
             if hasChildren && isGroupExpanded(group.id) {
                 ForEach(nodes) { node in
@@ -416,6 +452,13 @@ struct ContentView: View {
         .listRowBackground(sidebarStripeFill(for: stripeIndex))
         .overlay(alignment: .top) {
             sidebarGroupDividerOverlay(isVisible: stripeIndex > 0)
+        }
+        .contextMenu {
+            if let rootURL = group.sourceRootURL {
+                Button("Remove Folder", role: .destructive) {
+                    library.removeRootFolder(rootURL)
+                }
+            }
         }
     }
 
@@ -445,28 +488,6 @@ struct ContentView: View {
                             systemImage: nil,
                             isActiveOverride: isCollapsedActiveNode(node)
                         )
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    } else {
-                        Button {
-                            toggleGroupExpansion(node.id)
-                        } label: {
-                            HStack {
-                                Text(node.title)
-                                    .lineLimit(2)
-                                Spacer()
-                                Text("\(node.children.count)")
-                                    .foregroundStyle(.secondary)
-                            }
-                            .padding(.vertical, 4)
-                            .padding(.horizontal, 8)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(
-                                RoundedRectangle(cornerRadius: 8)
-                                    .fill(isCollapsedActiveNode(node) ? Color.accentColor.opacity(0.14) : Color.clear)
-                            )
-                            .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
                         .frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }
@@ -557,11 +578,11 @@ struct ContentView: View {
             } else if library.isLoading {
                 ProgressView()
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if !library.hasChosenRoot {
+            } else if library.rootURLs.isEmpty {
                 PlaceholderView(
-                    title: "No Library Loaded",
+                    title: "No Folders Added",
                     systemImage: "photo.on.rectangle.angled",
-                    description: "Click the folder button above or use File → Choose Image Root to load your images.\nFor TagExplorer-style layouts, enable Legacy Mode from the Mode menu."
+                    description: "Click the folder button above or use File → Add Root Folder to load your images."
                 )
             } else {
                 PlaceholderView(title: "Choose a Category", systemImage: "photo.on.rectangle")
@@ -986,10 +1007,10 @@ struct ContentView: View {
     }
 
     private func loadFacetValues() async {
-        guard let index = library.metadataIndex else { return }
+        guard library.hasAnyMetadataIndex else { return }
         var result: [MetadataField: [(value: String, count: Int)]] = [:]
         for field in MetadataField.allCases {
-            result[field] = await index.facetValues(for: field)
+            result[field] = await library.facetValues(for: field)
         }
         facetValues = result
     }
@@ -1218,14 +1239,13 @@ struct ContentView: View {
         var nodes: [SidebarNode] = []
 
         for category in group.categories {
-            let relativePath = Array(category.pathParts.dropFirst())
-
-            // Root category (no relative path) is represented by the group header itself — skip.
-            guard !relativePath.isEmpty else { continue }
+            // Root-level category is represented by the group header itself — skip.
+            guard category.folderURL.standardizedFileURL != category.sourceRootURL?.standardizedFileURL
+            else { continue }
 
             insertSidebarNode(
                 category: category,
-                remainingParts: relativePath,
+                remainingParts: category.pathParts,
                 accumulatedPath: [group.id],
                 nodes: &nodes
             )
@@ -1247,7 +1267,9 @@ private func isCollapsedActiveNode(_ node: SidebarNode) -> Bool {
             return false
         }
 
-        return selectedCategory.pathParts.starts(with: node.pathParts)
+        // node.pathParts is prefixed with the root group ID (hash); drop it to get the category-relative path.
+        let nodeCategoryParts = node.pathParts.count > 1 ? Array(node.pathParts.dropFirst()) : node.pathParts
+        return selectedCategory.pathParts.starts(with: nodeCategoryParts)
     }
 
     private func toggleGroupExpansion(_ groupID: String) {

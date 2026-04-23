@@ -4,6 +4,15 @@ import SQLite3
 // SQLITE_TRANSIENT is a C macro not bridged to Swift — define it manually.
 private let SQLITE_TRANSIENT = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
+// djb2 hash of the standardised root URL path — stable SQLite filename per root.
+func rootURLHash(_ url: URL) -> String {
+    var hash: UInt64 = 5381
+    for byte in url.standardizedFileURL.path.utf8 {
+        hash = hash &* 31 &+ UInt64(byte)
+    }
+    return String(format: "%016llx", hash)
+}
+
 enum MetadataIndexError: Error {
     case cannotOpenDatabase(String)
     case schemaSetupFailed(String)
@@ -20,12 +29,7 @@ actor MetadataIndex {
         let appDir = appSupport.appendingPathComponent("AiGallery")
         try FileManager.default.createDirectory(at: appDir, withIntermediateDirectories: true)
 
-        // Stable filename per root URL — djb2 hash of the standardised path
-        var hash: UInt64 = 5381
-        for byte in rootURL.standardizedFileURL.path.utf8 {
-            hash = hash &* 31 &+ UInt64(byte)
-        }
-        self.dbURL = appDir.appendingPathComponent(String(format: "%016llx.sqlite", hash))
+        self.dbURL = appDir.appendingPathComponent("\(rootURLHash(rootURL)).sqlite")
 
         var ptr: OpaquePointer?
         let rc = sqlite3_open(dbURL.path, &ptr)

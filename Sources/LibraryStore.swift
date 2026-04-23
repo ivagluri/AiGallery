@@ -2,38 +2,58 @@ import AppKit
 import Foundation
 
 final class LibraryStore: ObservableObject {
-    @Published var rootURL: URL
+
+    // MARK: - Published state
+
+    @Published var rootURLs: [URL] = []
     @Published var categories: [Category] = []
     @Published var selectedCategoryID: Category.ID?
     @Published var selectedImageID: ImageItem.ID?
     @Published var errorMessage: String?
     @Published var isLoading = false
+    @Published private(set) var loadedRootURLs: Set<URL> = []
+    @Published private(set) var loadingRootURLs: Set<URL> = []
+    @Published private(set) var indexProgressByRoot: [URL: Double] = [:]
+    @Published var activeMetadataFilters: [MetadataFilter] = []
+    @Published var smartFilters: [SmartFilter] = []
+
+    // MARK: - Private state
 
     private let fileManager = FileManager.default
-    private let appSettings: AppSettings
     private let userDefaults: UserDefaults
     private var pngInfoCache: [String: ImageMetadata?] = [:]
     private var folderMetadataCache: [String: ImageMetadata?] = [:]
-    private var sourceCategories: [Category] = []
-    private var searchIndex: [ImageItem] = []
-    private var favoriteImageIDs: Set<String>
+    private var sourceCategoriesByRoot: [URL: [Category]] = [:]
+    private var searchIndexByRoot: [URL: [ImageItem]] = [:]
+    private var metadataIndexes: [URL: MetadataIndex] = [:]
+    private var indexScanTasksByRoot: [URL: Task<Void, Never>] = [:]
     private var reloadTask: Task<Void, Never>?
-    private var indexScanTask: Task<Void, Never>?
     private var filterTask: Task<Void, Never>?
-    private(set) var metadataIndex: MetadataIndex?
-    @Published var indexProgress: Double = 0
-    @Published var activeMetadataFilters: [MetadataFilter] = []
-    @Published private(set) var hasChosenRoot: Bool = false
-    private var filteredImagePaths: Set<String> = []
-    @Published var smartFilters: [SmartFilter] = []
-    private var smartFilterResults: [UUID: [ImageItem]] = [:]
     private var smartFilterTask: Task<Void, Never>?
+    private var favoriteImageIDs: Set<String>
+    private var filteredImagePaths: Set<String> = []
+    private var smartFilterResults: [UUID: [ImageItem]] = [:]
 
-    private static let rootURLDefaultsKey = "selectedRootURL"
+    // MARK: - Derived
+
+    var sourceCategories: [Category] { sourceCategoriesByRoot.values.flatMap { $0 } }
+    private var searchIndex: [ImageItem] { searchIndexByRoot.values.flatMap { $0 } }
+    var hasChosenRoot: Bool { !rootURLs.isEmpty }
+    var indexProgress: Double {
+        guard !indexProgressByRoot.isEmpty else { return 0 }
+        return indexProgressByRoot.values.reduce(0, +) / Double(indexProgressByRoot.count)
+    }
+    var hasAnyMetadataIndex: Bool { !metadataIndexes.isEmpty }
+
+    // MARK: - UserDefaults keys
+
+    private static let rootURLsDefaultsKey = "selectedRootURLs"
+    private static let rootURLDefaultsKey = "selectedRootURL"               // legacy migration
     private static let selectedCategoryDefaultsKey = "selectedCategoryID"
     private static let favoriteImageIDsDefaultsKey = "favoriteImageIDsByRoot"
     private static let legacyFavoriteImageIDsDefaultsKey = "favoriteImageIDs"
-    private static let smartFiltersDefaultsKey = "smartFiltersByRoot"
+    private static let globalSmartFiltersDefaultsKey = "globalSmartFilters"
+    private static let smartFiltersDefaultsKey = "smartFiltersByRoot"        // legacy migration
     private static let rootCategoryID = "__root__"
     private static let favoritesID = "__favorites__"
     private static let filteredID = "__filtered__"
@@ -43,73 +63,104 @@ final class LibraryStore: ObservableObject {
         "__smart_\(filterID.uuidString)__"
     }
 
-    init(appSettings: AppSettings, userDefaults: UserDefaults = .standard) {
-        self.appSettings = appSettings
+    // MARK: - Init
+
+    init(userDefaults: UserDefaults = .standard) {
         self.userDefaults = userDefaults
-        let defaultRootURL = Self.persistedRootURL(from: userDefaults) ?? Self.profile(for: appSettings.appMode).suggestedInitialRootURL(
-            fileManager: FileManager.default,
-            bundleURL: Bundle.main.bundleURL,
-            sourceFilePath: #filePath
-        )
-        let fallbackRootURL = FileManager.default.homeDirectoryForCurrentUser
-        self.rootURL = defaultRootURL ?? fallbackRootURL
+
+        let persistedURLs = Self.persistedRootURLs(from: userDefaults)
+        self.rootURLs = persistedURLs
         self.selectedCategoryID = userDefaults.string(forKey: Self.selectedCategoryDefaultsKey)
-        self.favoriteImageIDs = []
-        self.favoriteImageIDs = loadFavoriteImageIDs(for: self.rootURL)
 
-        self.hasChosenRoot = defaultRootURL != nil
-        self.smartFilters = Self.loadSmartFilters(for: self.rootURL, userDefaults: userDefaults)
+        // Favorites: union across all roots
+        var combinedFavorites = Set<String>()
+        for url in persistedURLs {
+            combinedFavorites.formUnion(Self.loadFavoriteImageIDsStatic(for: url, userDefaults: userDefaults))
+        }
+        self.favoriteImageIDs = combinedFavorites
 
-        if defaultRootURL != nil {
-            // Synchronous on init so the window only appears once content is ready.
-            if let (loaded, index) = try? Self.buildLibrary(
-                rootURL: self.rootURL,
-                profile: Self.profile(for: appSettings.appMode)
-            ) {
-                sourceCategories = loaded
-                searchIndex = index
+        // Smart filters: global key with per-root migration
+        self.smartFilters = Self.loadGlobalSmartFilters(from: userDefaults, rootURLs: persistedURLs)
+
+        // Eagerly load the root that owns the saved selectedCategoryID, or the first root.
+        let activeURL = Self.rootURLForSavedCategory(
+            selectedCategoryID: selectedCategoryID,
+            rootURLs: persistedURLs
+        ) ?? persistedURLs.first
+
+        if let url = activeURL {
+            let profile = GeneralLibraryProfile()
+            if let (loaded, index) = try? Self.buildLibrary(rootURL: url, profile: profile) {
+                sourceCategoriesByRoot[url] = loaded
+                searchIndexByRoot[url] = index
+                loadedRootURLs = [url]
+                pruneFavoritesToExistingImages()
+                rebuildCategories()
+                selectedCategoryID = Self.validCategoryID(current: selectedCategoryID, categories: categories)
+                selectedImageID = Self.validImageID(
+                    current: selectedImageID,
+                    categories: categories,
+                    selectedCategoryID: selectedCategoryID
+                )
+                startBackgroundIndexing(for: url)
             }
-            pruneFavoritesToExistingImages()
-            rebuildCategories()
-            selectedCategoryID = Self.validCategoryID(current: selectedCategoryID, categories: categories)
-            selectedImageID = Self.validImageID(current: selectedImageID, categories: categories, selectedCategoryID: selectedCategoryID)
-            startBackgroundIndexing()
         } else {
             categories = []
-            sourceCategories = []
             persistSelectedCategoryID(nil)
             selectedImageID = nil
-            errorMessage = nil
         }
 
+        // Background-index all non-loaded roots for cross-root search coverage.
+        for url in persistedURLs where !loadedRootURLs.contains(url) {
+            startBackgroundIndexing(for: url)
+        }
     }
+
+    // MARK: - Computed navigation
 
     var selectedCategory: Category? {
         categories.first { $0.id == selectedCategoryID } ?? categories.first
     }
 
     var categoryGroups: [CategoryGroup] {
-        Dictionary(grouping: categories, by: \.rootGroupID)
+        // Build groups from loaded categories
+        var groups: [CategoryGroup] = Dictionary(grouping: categories, by: \.rootGroupID)
             .values
             .map { groupedCategories in
-                let sortedCategories = groupedCategories.sorted(by: { lhs, rhs in
+                let sorted = groupedCategories.sorted { lhs, rhs in
                     lhs.pathParts.map { $0.lowercased() }.joined(separator: "/")
-                        .localizedCaseInsensitiveCompare(rhs.pathParts.map { $0.lowercased() }.joined(separator: "/")) == .orderedAscending
-                })
-                let firstCategory = sortedCategories[0]
+                        .localizedCaseInsensitiveCompare(
+                            rhs.pathParts.map { $0.lowercased() }.joined(separator: "/")
+                        ) == .orderedAscending
+                }
+                let first = sorted[0]
                 return CategoryGroup(
-                    id: firstCategory.rootGroupID,
-                    name: firstCategory.rootGroupName,
-                    categories: sortedCategories,
-                    isSynthetic: firstCategory.isSynthetic
+                    id: first.rootGroupID,
+                    name: first.rootGroupName,
+                    categories: sorted,
+                    isSynthetic: first.isSynthetic,
+                    sourceRootURL: first.sourceRootURL
                 )
             }
-            .sorted { lhs, rhs in
-                if lhs.isSynthetic != rhs.isSynthetic {
-                    return lhs.isSynthetic
-                }
-                return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
-            }
+
+        // Add placeholder groups for registered-but-unloaded roots
+        let loadedGroupIDs = Set(groups.map(\.id))
+        for url in rootURLs {
+            let hash = rootURLHash(url)
+            guard !loadedGroupIDs.contains(hash) else { continue }
+            groups.append(CategoryGroup(
+                id: hash,
+                name: url.lastPathComponent,
+                categories: [],
+                isSynthetic: false,
+                sourceRootURL: url
+            ))
+        }
+
+        return groups.sorted { lhs, rhs in
+            if lhs.isSynthetic != rhs.isSynthetic { return lhs.isSynthetic }
+            return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
+        }
     }
 
     var selectedImage: ImageItem? {
@@ -121,48 +172,150 @@ final class LibraryStore: ObservableObject {
         sourceCategories.flatMap(\.images)
     }
 
+    // MARK: - Reload
+
     func reload() {
         reloadTask?.cancel()
-        let capturedRootURL = rootURL
-        let capturedProfile = Self.profile(for: appSettings.appMode)
+        let urlsToReload = Array(loadedRootURLs)
+        guard !urlsToReload.isEmpty else { return }
+        let profile = GeneralLibraryProfile()
         isLoading = true
 
         reloadTask = Task {
             do {
-                let (loadedCategories, loadedSearchIndex) = try await Task.detached(priority: .userInitiated) {
-                    try Self.buildLibrary(rootURL: capturedRootURL, profile: capturedProfile)
-                }.value
-
-                try Task.checkCancellation()
+                var collected: [(url: URL, cats: [Category], idx: [ImageItem])] = []
+                for url in urlsToReload {
+                    let (cats, idx) = try await Task.detached(priority: .userInitiated) {
+                        try Self.buildLibrary(rootURL: url, profile: profile)
+                    }.value
+                    try Task.checkCancellation()
+                    collected.append((url, cats, idx))
+                }
+                let finalCats = Dictionary(uniqueKeysWithValues: collected.map { ($0.url, $0.cats) })
+                let finalIdx  = Dictionary(uniqueKeysWithValues: collected.map { ($0.url, $0.idx) })
 
                 await MainActor.run {
-                    sourceCategories = loadedCategories
-                    searchIndex = loadedSearchIndex
+                    sourceCategoriesByRoot = finalCats
+                    searchIndexByRoot = finalIdx
                     pngInfoCache.removeAll()
                     folderMetadataCache.removeAll()
                     pruneFavoritesToExistingImages()
                     rebuildCategories()
                     selectedCategoryID = Self.validCategoryID(current: selectedCategoryID, categories: categories)
                     persistSelectedCategoryID(selectedCategoryID)
-                    selectedImageID = Self.validImageID(current: selectedImageID, categories: categories, selectedCategoryID: selectedCategoryID)
+                    selectedImageID = Self.validImageID(
+                        current: selectedImageID, categories: categories, selectedCategoryID: selectedCategoryID
+                    )
                     errorMessage = nil
                     isLoading = false
-                    startBackgroundIndexing()
+                    for url in urlsToReload { startBackgroundIndexing(for: url) }
                 }
             } catch is CancellationError {
-                // superseded by a newer reload — leave isLoading for the replacement task to clear
+                // superseded by a newer reload
             } catch {
                 await MainActor.run {
-                    categories = []
-                    sourceCategories = []
-                    persistSelectedCategoryID(nil)
-                    selectedImageID = nil
                     errorMessage = error.localizedDescription
                     isLoading = false
                 }
             }
         }
     }
+
+    // MARK: - Lazy root loading
+
+    func loadRoot(_ url: URL) {
+        guard !loadedRootURLs.contains(url), !loadingRootURLs.contains(url) else { return }
+        loadingRootURLs.insert(url)
+        let profile = GeneralLibraryProfile()
+
+        Task {
+            do {
+                let (cats, idx) = try await Task.detached(priority: .userInitiated) {
+                    try Self.buildLibrary(rootURL: url, profile: profile)
+                }.value
+                try Task.checkCancellation()
+
+                await MainActor.run {
+                    sourceCategoriesByRoot[url] = cats
+                    searchIndexByRoot[url] = idx
+                    loadedRootURLs.insert(url)
+                    loadingRootURLs.remove(url)
+                    pruneFavoritesToExistingImages()
+                    rebuildCategories()
+                    // Don't reset selectedCategoryID — user may have navigated via search
+                    startBackgroundIndexing(for: url)
+                }
+            } catch {
+                Task { @MainActor [weak self] in self?.loadingRootURLs.remove(url) }
+            }
+        }
+    }
+
+    // MARK: - Add / remove root folders
+
+    func addRootFolder(completion: ((Bool) -> Void)? = nil) {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = true
+        panel.prompt = "Add"
+        panel.message = "Choose one or more folders containing your image folders."
+
+        panel.begin { [weak self] result in
+            guard let self else { return }
+            guard result == .OK, !panel.urls.isEmpty else { completion?(false); return }
+
+            var added = false
+            for url in panel.urls {
+                let standardized = url.standardizedFileURL
+                guard !self.rootURLs.contains(where: { $0.standardizedFileURL == standardized }) else { continue }
+                self.rootURLs.append(standardized)
+                added = true
+            }
+
+            if added {
+                self.persistRootURLs()
+                // Background-index new roots immediately; category load is lazy
+                for url in panel.urls {
+                    let standardized = url.standardizedFileURL
+                    if !self.loadedRootURLs.contains(standardized) {
+                        self.startBackgroundIndexing(for: standardized)
+                    }
+                }
+                // Trigger rebuildCategories so placeholder groups appear
+                self.rebuildCategories()
+            }
+            completion?(added)
+        }
+    }
+
+    func removeRootFolder(_ url: URL) {
+        let standardized = url.standardizedFileURL
+        rootURLs.removeAll { $0.standardizedFileURL == standardized }
+        loadedRootURLs.remove(standardized)
+        loadingRootURLs.remove(standardized)
+        sourceCategoriesByRoot.removeValue(forKey: standardized)
+        searchIndexByRoot.removeValue(forKey: standardized)
+        indexScanTasksByRoot[standardized]?.cancel()
+        indexScanTasksByRoot.removeValue(forKey: standardized)
+        metadataIndexes.removeValue(forKey: standardized)
+        indexProgressByRoot.removeValue(forKey: standardized)
+        persistRootURLs()
+        // Evict stale smart filter results from this root, then re-resolve against remaining indexes.
+        smartFilterTask?.cancel()
+        smartFilterResults = [:]
+        rebuildCategories()
+        selectedCategoryID = Self.validCategoryID(current: selectedCategoryID, categories: categories)
+        persistSelectedCategoryID(selectedCategoryID)
+        selectedImageID = Self.validImageID(
+            current: selectedImageID, categories: categories, selectedCategoryID: selectedCategoryID
+        )
+        // Re-run filters/smart-filters against remaining indexes.
+        if !activeMetadataFilters.isEmpty { applyMetadataFilters() }
+        smartFilterTask = Task { await resolveSmartFilters() }
+    }
+
+    // MARK: - Category / image selection
 
     func selectCategory(_ category: Category?) {
         selectedCategoryID = category?.id
@@ -174,6 +327,8 @@ final class LibraryStore: ObservableObject {
         selectedImageID = image?.id
     }
 
+    // MARK: - Favorites
+
     func isFavorite(_ image: ImageItem) -> Bool {
         favoriteImageIDs.contains(image.id)
     }
@@ -184,36 +339,45 @@ final class LibraryStore: ObservableObject {
         } else {
             favoriteImageIDs.insert(image.id)
         }
-
         persistFavoriteImageIDs()
         rebuildCategories()
         selectedCategoryID = Self.validCategoryID(current: selectedCategoryID, categories: categories)
         persistSelectedCategoryID(selectedCategoryID)
-        selectedImageID = Self.validImageID(current: selectedImageID, categories: categories, selectedCategoryID: selectedCategoryID)
+        selectedImageID = Self.validImageID(
+            current: selectedImageID, categories: categories, selectedCategoryID: selectedCategoryID
+        )
     }
+
+    // MARK: - Trash
 
     func trashImage(_ image: ImageItem) {
         try? FileManager.default.trashItem(at: image.fileURL, resultingItemURL: nil)
-        sourceCategories = sourceCategories.map { cat in
-            Category(
-                id: cat.id,
-                name: cat.name,
-                shortName: cat.shortName,
-                pathParts: cat.pathParts,
-                rootGroupID: cat.rootGroupID,
-                rootGroupName: cat.rootGroupName,
-                folderURL: cat.folderURL,
-                images: cat.images.filter { $0.id != image.id },
-                isSynthetic: cat.isSynthetic
-            )
+
+        for (rootURL, cats) in sourceCategoriesByRoot {
+            sourceCategoriesByRoot[rootURL] = cats.map { cat in
+                Category(
+                    id: cat.id, name: cat.name, shortName: cat.shortName,
+                    pathParts: cat.pathParts, rootGroupID: cat.rootGroupID, rootGroupName: cat.rootGroupName,
+                    folderURL: cat.folderURL, images: cat.images.filter { $0.id != image.id },
+                    isSynthetic: cat.isSynthetic, sourceRootURL: cat.sourceRootURL
+                )
+            }
         }
+        for (rootURL, idx) in searchIndexByRoot {
+            searchIndexByRoot[rootURL] = idx.filter { $0.id != image.id }
+        }
+
         favoriteImageIDs.remove(image.id)
         persistFavoriteImageIDs()
         rebuildCategories()
         selectedCategoryID = Self.validCategoryID(current: selectedCategoryID, categories: categories)
         persistSelectedCategoryID(selectedCategoryID)
-        selectedImageID = Self.validImageID(current: selectedImageID, categories: categories, selectedCategoryID: selectedCategoryID)
+        selectedImageID = Self.validImageID(
+            current: selectedImageID, categories: categories, selectedCategoryID: selectedCategoryID
+        )
     }
+
+    // MARK: - Metadata filters
 
     func setMetadataFilter(_ filter: MetadataFilter) {
         activeMetadataFilters.removeAll { $0.field == filter.field }
@@ -235,11 +399,10 @@ final class LibraryStore: ObservableObject {
         persistSelectedCategoryID(selectedCategoryID)
     }
 
-    func pngInfo(for image: ImageItem) -> ImageMetadata? {
-        if let cached = pngInfoCache[image.id] {
-            return cached
-        }
+    // MARK: - Metadata info
 
+    func pngInfo(for image: ImageItem) -> ImageMetadata? {
+        if let cached = pngInfoCache[image.id] { return cached }
         let info = PNGInfoReader.read(from: image.fileURL)
         pngInfoCache[image.id] = info
         return info
@@ -247,91 +410,57 @@ final class LibraryStore: ObservableObject {
 
     func inspectorMetadata(for image: ImageItem) -> ImageMetadata? {
         let pngInfo = pngInfo(for: image)
-        let folderMetadata = folderMetadata(for: image)
+        let folderMeta = folderMetadata(for: image)
 
-        let prompt = pngInfo?.prompt ?? folderMetadata?.prompt
-        let negativePrompt = pngInfo?.negativePrompt ?? folderMetadata?.negativePrompt
+        let prompt = pngInfo?.prompt ?? folderMeta?.prompt
+        let negativePrompt = pngInfo?.negativePrompt ?? folderMeta?.negativePrompt
         let promptStatusMessage = prompt == nil
-            ? (pngInfo?.promptStatusMessage ?? folderMetadata?.promptStatusMessage)
+            ? (pngInfo?.promptStatusMessage ?? folderMeta?.promptStatusMessage)
             : nil
         let generationParameters = mergeEntries(
             primary: pngInfo?.generationParameters ?? [],
-            fallback: folderMetadata?.generationParameters ?? []
+            fallback: folderMeta?.generationParameters ?? []
         )
         let textEntries = mergeEntries(
             primary: pngInfo?.textEntries ?? [],
-            fallback: folderMetadata?.textEntries ?? []
+            fallback: folderMeta?.textEntries ?? []
         )
-
         let metadata = ImageMetadata(
-            prompt: prompt,
-            negativePrompt: negativePrompt,
+            prompt: prompt, negativePrompt: negativePrompt,
             promptStatusMessage: promptStatusMessage,
-            generationParameters: generationParameters,
-            textEntries: textEntries
+            generationParameters: generationParameters, textEntries: textEntries
         )
-
         return metadata.hasVisibleContent ? metadata : nil
     }
 
     func temporaryInspectionImage(for fileURL: URL) -> ImageItem? {
-        guard fileURL.pathExtension.lowercased() == "png", Self.isSupportedImage(fileURL) else {
-            return nil
-        }
-
-        return Self.makeImageItem(from: fileURL, profile: Self.profile(for: appSettings.appMode))
+        guard fileURL.pathExtension.lowercased() == "png", Self.isSupportedImage(fileURL) else { return nil }
+        return Self.makeImageItem(from: fileURL, profile: GeneralLibraryProfile())
     }
 
-    func chooseRootFolder(completion: ((Bool) -> Void)? = nil) {
-        let panel = NSOpenPanel()
-        panel.canChooseDirectories = true
-        panel.canChooseFiles = false
-        panel.allowsMultipleSelection = false
-        panel.prompt = "Open"
-        panel.message = "Choose the folder that contains your image folders or nested category folders."
-
-        panel.begin { [weak self] result in
-            guard let self else { return }
-            if result == .OK, let url = panel.url {
-                self.rootURL = url
-                self.hasChosenRoot = true
-                self.persistRootURL(url)
-                self.favoriteImageIDs = self.loadFavoriteImageIDs(for: url)
-                self.smartFilters = Self.loadSmartFilters(for: url, userDefaults: self.userDefaults)
-                self.smartFilterResults = [:]
-                self.reload()
-                completion?(true)
-            } else {
-                completion?(false)
-            }
-        }
-    }
+    // MARK: - Search
 
     func searchTags(matching query: String, limit: Int) -> SearchResult {
-        Self.profile(for: appSettings.appMode).search(matching: query, in: searchIndex, limit: limit)
+        GeneralLibraryProfile().search(matching: query, in: searchIndex, limit: limit)
     }
 
     func searchWithMetadata(matching query: String, limit: Int) async -> SearchResult {
         let filenameResult = searchTags(matching: query, limit: limit)
+        guard !metadataIndexes.isEmpty else { return filenameResult }
 
-        guard let index = metadataIndex else { return filenameResult }
-
-        // Parse into terms (respects "quoted phrases") and AND them on the metadata side.
         let terms = parseSearchTerms(query)
         guard !terms.isEmpty else { return filenameResult }
 
-        // For each term, collect all paths that match any metadata field or prompt.
-        // Then intersect across terms so only images matching ALL terms are included.
+        // AND across terms, union across all root indexes
         var metadataPaths: Set<String>? = nil
         for term in terms {
             var termPaths = Set<String>()
-            for field in MetadataField.allCases {
-                let paths = await index.imagePaths(where: field, contains: term)
-                termPaths.formUnion(paths)
+            for index in metadataIndexes.values {
+                for field in MetadataField.allCases {
+                    termPaths.formUnion(await index.imagePaths(where: field, contains: term))
+                }
+                termPaths.formUnion(await index.imagePathsWherePromptContains(term))
             }
-            let promptPaths = await index.imagePathsWherePromptContains(term)
-            termPaths.formUnion(promptPaths)
-
             if var accumulated = metadataPaths {
                 accumulated.formIntersection(termPaths)
                 metadataPaths = accumulated
@@ -344,7 +473,16 @@ final class LibraryStore: ObservableObject {
         let newMetadataPaths = (metadataPaths ?? []).subtracting(filenamePathSet)
         guard !newMetadataPaths.isEmpty else { return filenameResult }
 
-        let metadataImages = searchIndex.filter { newMetadataPaths.contains($0.id) }
+        // Resolve paths: use in-memory item if available, otherwise build lightweight item from path.
+        let loadedItems = Dictionary(uniqueKeysWithValues: searchIndex.map { ($0.id, $0) })
+        let profile = GeneralLibraryProfile()
+        let metadataImages: [ImageItem] = newMetadataPaths.compactMap { path in
+            if let item = loadedItems[path] { return item }
+            let url = URL(fileURLWithPath: path)
+            guard Self.isSupportedImage(url) else { return nil }
+            return Self.makeImageItem(from: url, profile: profile)
+        }
+
         let combined = filenameResult.images + metadataImages
         return SearchResult(
             images: Array(combined.prefix(limit)),
@@ -352,54 +490,17 @@ final class LibraryStore: ObservableObject {
         )
     }
 
-    func setAppMode(_ mode: AppMode) {
-        guard appSettings.appMode != mode else { return }
-        appSettings.appMode = mode
-        handleAppModeChange()
+    func facetValues(for field: MetadataField) async -> [(value: String, count: Int)] {
+        var merged: [String: Int] = [:]
+        for index in metadataIndexes.values {
+            for (value, count) in await index.facetValues(for: field) {
+                merged[value, default: 0] += count
+            }
+        }
+        return merged.sorted { $0.value > $1.value }.map { (value: $0.key, count: $0.value) }
     }
 
-    private func handleAppModeChange() {
-        if let persistedRootURL = Self.persistedRootURL(from: userDefaults) {
-            rootURL = persistedRootURL
-            favoriteImageIDs = loadFavoriteImageIDs(for: persistedRootURL)
-            reload()
-            return
-        }
-
-        if let suggestedRootURL = Self.profile(for: appSettings.appMode).suggestedInitialRootURL(
-            fileManager: fileManager,
-            bundleURL: Bundle.main.bundleURL,
-            sourceFilePath: #filePath
-        ) {
-            rootURL = suggestedRootURL
-            favoriteImageIDs = loadFavoriteImageIDs(for: suggestedRootURL)
-            reload()
-            return
-        }
-
-        reloadTask?.cancel()
-        indexScanTask?.cancel()
-        filterTask?.cancel()
-        smartFilterTask?.cancel()
-        indexScanTask = nil
-        filterTask = nil
-        smartFilterTask = nil
-        metadataIndex = nil
-        indexProgress = 0
-        activeMetadataFilters = []
-        filteredImagePaths = []
-        rootURL = fileManager.homeDirectoryForCurrentUser
-        favoriteImageIDs = loadFavoriteImageIDs(for: rootURL)
-        pngInfoCache.removeAll()
-        folderMetadataCache.removeAll()
-        searchIndex = []
-        sourceCategories = []
-        categories = []
-        persistSelectedCategoryID(nil)
-        selectedImageID = nil
-        errorMessage = nil
-        isLoading = false
-    }
+    // MARK: - Private helpers
 
     private static func loadImages(in folderURL: URL, profile: any LibraryProfile) throws -> [ImageItem] {
         let imageURLs = try FileManager.default.contentsOfDirectory(
@@ -409,16 +510,12 @@ final class LibraryStore: ObservableObject {
         )
         .filter(isSupportedImage)
         .sorted { $0.lastPathComponent.localizedCaseInsensitiveCompare($1.lastPathComponent) == .orderedAscending }
-
         return imageURLs.map { makeImageItem(from: $0, profile: profile) }
     }
 
     private func folderMetadata(for image: ImageItem) -> ImageMetadata? {
         let folderPath = image.fileURL.deletingLastPathComponent().path
-        if let cached = folderMetadataCache[folderPath] {
-            return cached
-        }
-
+        if let cached = folderMetadataCache[folderPath] { return cached }
         let info = FolderMetadataReader.read(from: image.fileURL.deletingLastPathComponent())
         folderMetadataCache[folderPath] = info
         return info
@@ -427,17 +524,15 @@ final class LibraryStore: ObservableObject {
     private func mergeEntries(primary: [PNGTextEntry], fallback: [PNGTextEntry]) -> [PNGTextEntry] {
         var merged = primary
         let existingKeys = Set(primary.map { $0.keyword.lowercased() })
-
         for entry in fallback where !existingKeys.contains(entry.keyword.lowercased()) {
             merged.append(entry)
         }
-
         return merged
     }
 
     private func applyMetadataFilters() {
         filterTask?.cancel()
-        guard !activeMetadataFilters.isEmpty, let index = metadataIndex else {
+        guard !activeMetadataFilters.isEmpty, !metadataIndexes.isEmpty else {
             filteredImagePaths = []
             rebuildCategories()
             selectedCategoryID = Self.validCategoryID(current: selectedCategoryID, categories: categories)
@@ -445,16 +540,20 @@ final class LibraryStore: ObservableObject {
             return
         }
         let filters = activeMetadataFilters
+        let indexes = Array(metadataIndexes.values)
         filterTask = Task {
-            let paths = await index.imagePaths(matching: filters)
+            var acc = Set<String>()
+            for index in indexes {
+                acc.formUnion(await index.imagePaths(matching: filters))
+            }
             guard !Task.isCancelled else { return }
+            let finalPaths = acc
             await MainActor.run { [weak self] in
                 guard let self else { return }
-                self.filteredImagePaths = paths
+                self.filteredImagePaths = finalPaths
                 self.rebuildCategories()
                 self.selectedCategoryID = Self.validCategoryID(
-                    current: Self.filteredID,
-                    categories: self.categories
+                    current: Self.filteredID, categories: self.categories
                 )
                 self.persistSelectedCategoryID(self.selectedCategoryID)
             }
@@ -486,32 +585,43 @@ final class LibraryStore: ObservableObject {
     }
 
     private func persistSmartFilters() {
-        var byRoot = userDefaults.dictionary(forKey: Self.smartFiltersDefaultsKey) as? [String: Data] ?? [:]
-        let key = Self.favoriteImageIDsStorageKey(for: rootURL)
-        byRoot[key] = try? JSONEncoder().encode(smartFilters)
-        userDefaults.set(byRoot, forKey: Self.smartFiltersDefaultsKey)
+        if let data = try? JSONEncoder().encode(smartFilters) {
+            userDefaults.set(data, forKey: Self.globalSmartFiltersDefaultsKey)
+        }
     }
 
-    private static func loadSmartFilters(for rootURL: URL, userDefaults: UserDefaults) -> [SmartFilter] {
-        let key = favoriteImageIDsStorageKey(for: rootURL)
-        guard
-            let byRoot = userDefaults.dictionary(forKey: smartFiltersDefaultsKey) as? [String: Data],
-            let data = byRoot[key],
-            let filters = try? JSONDecoder().decode([SmartFilter].self, from: data)
-        else { return [] }
-        return filters
+    private static func loadGlobalSmartFilters(from userDefaults: UserDefaults, rootURLs: [URL]) -> [SmartFilter] {
+        // Try global key first
+        if let data = userDefaults.data(forKey: globalSmartFiltersDefaultsKey),
+           let filters = try? JSONDecoder().decode([SmartFilter].self, from: data) {
+            return filters
+        }
+        // Migration: merge per-root smart filters into global list
+        var merged: [SmartFilter] = []
+        var seenIDs = Set<UUID>()
+        for url in rootURLs {
+            let key = favoriteImageIDsStorageKey(for: url)
+            guard
+                let byRoot = userDefaults.dictionary(forKey: smartFiltersDefaultsKey) as? [String: Data],
+                let data = byRoot[key],
+                let filters = try? JSONDecoder().decode([SmartFilter].self, from: data)
+            else { continue }
+            for f in filters where !seenIDs.contains(f.id) {
+                merged.append(f)
+                seenIDs.insert(f.id)
+            }
+        }
+        return merged
     }
 
     private func resolveSmartFilters() async {
         let filters = smartFilters
         guard !filters.isEmpty else { return }
-
         var newResults: [UUID: [ImageItem]] = [:]
         for filter in filters {
             let result = await searchWithMetadata(matching: filter.query, limit: 10_000)
             newResults[filter.id] = result.images
         }
-
         let resolvedResults = newResults
         await MainActor.run { [weak self] in
             guard let self else { return }
@@ -523,86 +633,83 @@ final class LibraryStore: ObservableObject {
         }
     }
 
-    private func startBackgroundIndexing() {
-        indexScanTask?.cancel()
-        let images = searchIndex
-        let url = rootURL
-        guard !images.isEmpty else { return }
-        indexProgress = 0
+    // MARK: - Background indexing
 
-        indexScanTask = Task {
+    private func startBackgroundIndexing(for url: URL) {
+        indexScanTasksByRoot[url]?.cancel()
+        indexProgressByRoot[url] = 0
+        let profile = GeneralLibraryProfile()
+
+        indexScanTasksByRoot[url] = Task {
             do {
                 let index = try MetadataIndex(rootURL: url)
-                await MainActor.run { [weak self] in self?.metadataIndex = index }
+                await MainActor.run { [weak self] in self?.metadataIndexes[url] = index }
+                guard !Task.isCancelled else { return }
+
+                // Use in-memory search index if loaded; otherwise light-scan the filesystem.
+                let inMemory = await MainActor.run(resultType: [ImageItem].self) { [weak self] in
+                    self?.searchIndexByRoot[url] ?? []
+                }
+                let images: [ImageItem]
+                if !inMemory.isEmpty {
+                    images = inMemory
+                } else {
+                    images = (try? await Task.detached(priority: .background) {
+                        try Self.buildLibrary(rootURL: url, profile: profile).searchIndex
+                    }.value) ?? []
+                }
+
                 guard !Task.isCancelled else { return }
                 await index.scan(images: images) { @Sendable [weak self] progress in
-                    Task { @MainActor [weak self] in self?.indexProgress = progress }
+                    Task { @MainActor [weak self] in self?.indexProgressByRoot[url] = progress }
                 }
                 guard !Task.isCancelled else { return }
                 await resolveSmartFilters()
             } catch {
-                // Indexing is a best-effort enhancement; the app works fine without it.
+                // Best-effort
             }
         }
     }
 
+    // MARK: - Category rebuilding
+
     private func rebuildCategories() {
-        let favoriteImages = sourceCategories
-            .flatMap(\.images)
+        let allSourceImages = sourceCategories.flatMap(\.images)
+        let favoriteImages = allSourceImages
             .filter { favoriteImageIDs.contains($0.id) }
             .sorted { $0.displayLabel.localizedCaseInsensitiveCompare($1.displayLabel) == .orderedAscending }
 
         var syntheticCategories: [Category] = []
+        let placeholder = URL(fileURLWithPath: "/")
 
         if !filteredImagePaths.isEmpty {
-            let filteredImages = sourceCategories
-                .flatMap(\.images)
+            let filteredImages = allSourceImages
                 .filter { filteredImagePaths.contains($0.id) }
                 .sorted { $0.displayLabel.localizedCaseInsensitiveCompare($1.displayLabel) == .orderedAscending }
-
             if !filteredImages.isEmpty {
                 syntheticCategories.append(Category(
-                    id: Self.filteredID,
-                    name: "Filtered",
-                    shortName: "Filtered",
-                    pathParts: ["Filtered"],
-                    rootGroupID: Self.filteredID,
-                    rootGroupName: "Filtered",
-                    folderURL: rootURL,
-                    images: filteredImages,
-                    isSynthetic: true
+                    id: Self.filteredID, name: "Filtered", shortName: "Filtered",
+                    pathParts: ["Filtered"], rootGroupID: Self.filteredID, rootGroupName: "Filtered",
+                    folderURL: placeholder, images: filteredImages, isSynthetic: true, sourceRootURL: nil
                 ))
             }
         }
 
         if !favoriteImages.isEmpty {
             syntheticCategories.append(Category(
-                id: Self.favoritesID,
-                name: "Favorites",
-                shortName: "Saved Images",
-                pathParts: ["Favorites"],
-                rootGroupID: Self.favoritesID,
-                rootGroupName: "Favorites",
-                folderURL: rootURL,
-                images: favoriteImages,
-                isSynthetic: true
+                id: Self.favoritesID, name: "Favorites", shortName: "Saved Images",
+                pathParts: ["Favorites"], rootGroupID: Self.favoritesID, rootGroupName: "Favorites",
+                folderURL: placeholder, images: favoriteImages, isSynthetic: true, sourceRootURL: nil
             ))
         }
 
-        // Smart filter synthetic categories (one per filter that has resolved results)
         var smartCategories: [Category] = []
         for filter in smartFilters {
             let images = smartFilterResults[filter.id] ?? []
             smartCategories.append(Category(
-                id: Self.smartFilterCategoryID(for: filter.id),
-                name: filter.name,
-                shortName: filter.name,
-                pathParts: [filter.name],
-                rootGroupID: Self.smartFiltersGroupID,
-                rootGroupName: "Smart Filters",
-                folderURL: rootURL,
-                images: images,
-                isSynthetic: true
+                id: Self.smartFilterCategoryID(for: filter.id), name: filter.name, shortName: filter.name,
+                pathParts: [filter.name], rootGroupID: Self.smartFiltersGroupID, rootGroupName: "Smart Filters",
+                folderURL: placeholder, images: images, isSynthetic: true, sourceRootURL: nil
             ))
         }
 
@@ -611,16 +718,16 @@ final class LibraryStore: ObservableObject {
 
     private func pruneFavoritesToExistingImages() {
         let validImageIDs = Set(sourceCategories.flatMap(\.images).map(\.id))
-        let filteredFavoriteImageIDs = favoriteImageIDs.intersection(validImageIDs)
-
-        guard filteredFavoriteImageIDs != favoriteImageIDs else { return }
-        favoriteImageIDs = filteredFavoriteImageIDs
+        let filtered = favoriteImageIDs.intersection(validImageIDs)
+        guard filtered != favoriteImageIDs else { return }
+        favoriteImageIDs = filtered
         persistFavoriteImageIDs()
     }
 
+    // MARK: - Persistence
+
     private func persistSelectedCategoryID(_ categoryID: Category.ID?) {
         selectedCategoryID = categoryID
-
         if let categoryID {
             userDefaults.set(categoryID, forKey: Self.selectedCategoryDefaultsKey)
         } else {
@@ -628,35 +735,65 @@ final class LibraryStore: ObservableObject {
         }
     }
 
-    private func persistRootURL(_ rootURL: URL) {
-        userDefaults.set(rootURL.standardizedFileURL.path, forKey: Self.rootURLDefaultsKey)
+    private func persistRootURLs() {
+        userDefaults.set(rootURLs.map(\.standardizedFileURL.path), forKey: Self.rootURLsDefaultsKey)
     }
 
     private func persistFavoriteImageIDs() {
         var favoritesByRoot = userDefaults.dictionary(forKey: Self.favoriteImageIDsDefaultsKey) as? [String: [String]] ?? [:]
-        favoritesByRoot[Self.favoriteImageIDsStorageKey(for: rootURL)] = Array(favoriteImageIDs).sorted()
+        for url in rootURLs {
+            let key = Self.favoriteImageIDsStorageKey(for: url)
+            let rootPath = url.standardizedFileURL.path
+            let rootFavorites = favoriteImageIDs.filter { $0.hasPrefix(rootPath + "/") || $0 == rootPath }
+            favoritesByRoot[key] = rootFavorites.sorted()
+        }
         userDefaults.set(favoritesByRoot, forKey: Self.favoriteImageIDsDefaultsKey)
     }
 
-    private func loadFavoriteImageIDs(for rootURL: URL) -> Set<String> {
-        let storageKey = Self.favoriteImageIDsStorageKey(for: rootURL)
-        let favoritesByRoot = userDefaults.dictionary(forKey: Self.favoriteImageIDsDefaultsKey) as? [String: [String]] ?? [:]
+    private static func loadFavoriteImageIDsStatic(for rootURL: URL, userDefaults: UserDefaults) -> Set<String> {
+        let storageKey = favoriteImageIDsStorageKey(for: rootURL)
+        let byRoot = userDefaults.dictionary(forKey: favoriteImageIDsDefaultsKey) as? [String: [String]] ?? [:]
+        if let ids = byRoot[storageKey] { return Set(ids) }
 
-        if let favoriteImageIDs = favoritesByRoot[storageKey] {
-            return Set(favoriteImageIDs)
-        }
-
-        let legacyFavoriteImageIDs = Set(userDefaults.stringArray(forKey: Self.legacyFavoriteImageIDsDefaultsKey) ?? [])
-        guard !legacyFavoriteImageIDs.isEmpty else {
-            return []
-        }
-
-        var migratedFavoritesByRoot = favoritesByRoot
-        migratedFavoritesByRoot[storageKey] = Array(legacyFavoriteImageIDs).sorted()
-        userDefaults.set(migratedFavoritesByRoot, forKey: Self.favoriteImageIDsDefaultsKey)
-        userDefaults.removeObject(forKey: Self.legacyFavoriteImageIDsDefaultsKey)
-        return legacyFavoriteImageIDs
+        // Legacy migration: single-root format
+        let legacyIDs = Set(userDefaults.stringArray(forKey: legacyFavoriteImageIDsDefaultsKey) ?? [])
+        guard !legacyIDs.isEmpty else { return [] }
+        var migrated = byRoot
+        migrated[storageKey] = Array(legacyIDs).sorted()
+        userDefaults.set(migrated, forKey: favoriteImageIDsDefaultsKey)
+        userDefaults.removeObject(forKey: legacyFavoriteImageIDsDefaultsKey)
+        return legacyIDs
     }
+
+    private func loadFavoriteImageIDs(for rootURL: URL) -> Set<String> {
+        Self.loadFavoriteImageIDsStatic(for: rootURL, userDefaults: userDefaults)
+    }
+
+    private static func persistedRootURLs(from userDefaults: UserDefaults) -> [URL] {
+        // Try new array key
+        if let paths = userDefaults.stringArray(forKey: rootURLsDefaultsKey), !paths.isEmpty {
+            return paths.compactMap { path -> URL? in
+                let url = URL(fileURLWithPath: path, isDirectory: true).standardizedFileURL
+                return FileManager.default.fileExists(atPath: url.path) ? url : nil
+            }
+        }
+        // Migration: single legacy key
+        if let path = userDefaults.string(forKey: rootURLDefaultsKey) {
+            let url = URL(fileURLWithPath: path, isDirectory: true).standardizedFileURL
+            if FileManager.default.fileExists(atPath: url.path) {
+                let urls = [url]
+                userDefaults.set(urls.map(\.path), forKey: rootURLsDefaultsKey)
+                return urls
+            }
+        }
+        return []
+    }
+
+    private static func favoriteImageIDsStorageKey(for rootURL: URL) -> String {
+        rootURL.standardizedFileURL.path
+    }
+
+    // MARK: - Library building
 
     private static func discoverCategoryFolders(
         rootURL: URL,
@@ -665,29 +802,25 @@ final class LibraryStore: ObservableObject {
         var result: [(folderURL: URL, images: [ImageItem])] = []
 
         let rootImages = try loadImages(in: rootURL, profile: profile)
-        if !rootImages.isEmpty {
-            result.append((rootURL, rootImages))
-        }
+        if !rootImages.isEmpty { result.append((rootURL, rootImages)) }
 
         guard let enumerator = FileManager.default.enumerator(
             at: rootURL,
             includingPropertiesForKeys: [.isDirectoryKey, .isRegularFileKey],
             options: [.skipsHiddenFiles]
-        ) else {
-            return result
-        }
+        ) else { return result }
 
         for case let url as URL in enumerator {
             guard isDirectory(url) else { continue }
             let images = try loadImages(in: url, profile: profile)
-            if !images.isEmpty {
-                result.append((url, images))
-            }
+            result.append((url, images))
         }
 
         return result.sorted {
             categorySortKey(for: $0.folderURL, relativeTo: rootURL, profile: profile)
-                .localizedCaseInsensitiveCompare(categorySortKey(for: $1.folderURL, relativeTo: rootURL, profile: profile)) == .orderedAscending
+                .localizedCaseInsensitiveCompare(
+                    categorySortKey(for: $1.folderURL, relativeTo: rootURL, profile: profile)
+                ) == .orderedAscending
         }
     }
 
@@ -696,18 +829,21 @@ final class LibraryStore: ObservableObject {
         profile: any LibraryProfile
     ) throws -> (categories: [Category], searchIndex: [ImageItem]) {
         let folders = try discoverCategoryFolders(rootURL: rootURL, profile: profile)
+        let hash = rootURLHash(rootURL)
         let loadedCategories = folders.map { folderURL, images in
             let pathParts = profile.categoryPathParts(for: folderURL, relativeTo: rootURL)
+            let rawID = categoryID(for: folderURL, relativeTo: rootURL)
             return Category(
-                id: categoryID(for: folderURL, relativeTo: rootURL),
+                id: "\(hash)/\(rawID)",
                 name: categoryName(for: pathParts),
                 shortName: subcategoryName(for: pathParts),
                 pathParts: pathParts,
-                rootGroupID: rootGroupID(for: pathParts),
-                rootGroupName: rootGroupName(for: pathParts),
+                rootGroupID: hash,
+                rootGroupName: rootURL.lastPathComponent,
                 folderURL: folderURL,
                 images: images,
-                isSynthetic: false
+                isSynthetic: false,
+                sourceRootURL: rootURL
             )
         }
         return (loadedCategories, makeSearchIndex(from: loadedCategories))
@@ -718,92 +854,49 @@ final class LibraryStore: ObservableObject {
     }
 
     private static func isSupportedImage(_ url: URL) -> Bool {
-        let supportedExtensions = ["png", "jpg", "jpeg", "webp"]
-        return supportedExtensions.contains(url.pathExtension.lowercased())
+        ["png", "jpg", "jpeg", "webp"].contains(url.pathExtension.lowercased())
     }
 
     private static func makeImageItem(from url: URL, profile: any LibraryProfile) -> ImageItem {
         let displayName = url.deletingPathExtension().lastPathComponent
-        let displayLabel = profile.displayLabel(for: displayName)
-
         return ImageItem(
             id: url.path,
             fileURL: url,
             displayName: displayName,
-            displayLabel: displayLabel
+            displayLabel: profile.displayLabel(for: displayName)
         )
     }
 
     private static func makeSearchIndex(from categories: [Category]) -> [ImageItem] {
-        categories
-            .flatMap(\.images)
-            .sorted { lhs, rhs in
-                let comparison = lhs.displayLabel.localizedCaseInsensitiveCompare(rhs.displayLabel)
-                if comparison == .orderedSame {
-                    return lhs.displayName.localizedCaseInsensitiveCompare(rhs.displayName) == .orderedAscending
-                }
-                return comparison == .orderedAscending
+        categories.flatMap(\.images).sorted { lhs, rhs in
+            let cmp = lhs.displayLabel.localizedCaseInsensitiveCompare(rhs.displayLabel)
+            if cmp == .orderedSame {
+                return lhs.displayName.localizedCaseInsensitiveCompare(rhs.displayName) == .orderedAscending
             }
-    }
-
-    private static func persistedRootURL(from userDefaults: UserDefaults) -> URL? {
-        guard let path = userDefaults.string(forKey: Self.rootURLDefaultsKey) else {
-            return nil
+            return cmp == .orderedAscending
         }
-
-        let url = URL(fileURLWithPath: path, isDirectory: true).standardizedFileURL
-        guard FileManager.default.fileExists(atPath: url.path) else {
-            userDefaults.removeObject(forKey: Self.rootURLDefaultsKey)
-            return nil
-        }
-
-        return url
     }
 
-    private static func favoriteImageIDsStorageKey(for rootURL: URL) -> String {
-        rootURL.standardizedFileURL.path
-    }
+    // MARK: - ID helpers
 
     private static func humanize(_ slug: String) -> String {
-        slug
-            .replacingOccurrences(of: "_", with: " ")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+        slug.replacingOccurrences(of: "_", with: " ").trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private static func categoryID(for folderURL: URL, relativeTo rootURL: URL) -> String {
-        if folderURL.standardizedFileURL == rootURL.standardizedFileURL {
-            return rootCategoryID
-        }
-
+        if folderURL.standardizedFileURL == rootURL.standardizedFileURL { return rootCategoryID }
         let rootComponents = rootURL.standardizedFileURL.pathComponents
         let folderComponents = folderURL.standardizedFileURL.pathComponents
-        let relativeComponents = folderComponents.dropFirst(rootComponents.count)
-        return relativeComponents.joined(separator: "/")
+        return folderComponents.dropFirst(rootComponents.count).joined(separator: "/")
     }
 
     private static func categoryName(for pathParts: [String]) -> String {
-        pathParts
-            .map(humanize)
-            .joined(separator: " / ")
-    }
-
-    private static func rootGroupID(for pathParts: [String]) -> String {
-        pathParts.first ?? ""
-    }
-
-    private static func rootGroupName(for pathParts: [String]) -> String {
-        humanize(rootGroupID(for: pathParts))
+        pathParts.map(humanize).joined(separator: " / ")
     }
 
     private static func subcategoryName(for pathParts: [String]) -> String {
-        let parts = pathParts
-        if parts.count <= 1 {
-            return "Overview"
-        }
-
-        return parts.dropFirst()
-            .map(humanize)
-            .joined(separator: " / ")
+        guard pathParts.count > 1 else { return "Overview" }
+        return pathParts.dropFirst().map(humanize).joined(separator: " / ")
     }
 
     private static func categorySortKey(
@@ -812,8 +905,7 @@ final class LibraryStore: ObservableObject {
         profile: any LibraryProfile
     ) -> String {
         profile.categoryPathParts(for: folderURL, relativeTo: rootURL)
-            .map { $0.lowercased() }
-            .joined(separator: "/")
+            .map { $0.lowercased() }.joined(separator: "/")
     }
 
     private static func validCategoryID(current: String?, categories: [Category]) -> String? {
@@ -823,27 +915,27 @@ final class LibraryStore: ObservableObject {
         return current
     }
 
-    private static func validImageID(current: String?, categories: [Category], selectedCategoryID: String?) -> String? {
+    private static func validImageID(
+        current: String?,
+        categories: [Category],
+        selectedCategoryID: String?
+    ) -> String? {
         guard
             let selectedCategoryID,
             let category = categories.first(where: { $0.id == selectedCategoryID })
-        else {
-            return nil
-        }
-
+        else { return nil }
         guard let current, category.images.contains(where: { $0.id == current }) else {
             return category.images.first?.id
         }
         return current
     }
 
-    private static func profile(for mode: AppMode) -> any LibraryProfile {
-        switch mode {
-        case .general:
-            return GeneralLibraryProfile()
-        case .tagExplorerLegacy:
-            return TagExplorerLegacyProfile()
-        }
+    private static func rootURLForSavedCategory(selectedCategoryID: String?, rootURLs: [URL]) -> URL? {
+        guard let id = selectedCategoryID else { return nil }
+        // New format: "[hash]/..." — extract hash prefix
+        let hashPart = String(id.prefix(16))
+        guard hashPart.count == 16 else { return nil }
+        return rootURLs.first { rootURLHash($0) == hashPart }
     }
 
 }

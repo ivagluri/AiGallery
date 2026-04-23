@@ -10,6 +10,7 @@ struct Category: Identifiable, Hashable {
     let folderURL: URL
     let images: [ImageItem]
     let isSynthetic: Bool
+    let sourceRootURL: URL?
 }
 
 struct ImageItem: Identifiable, Hashable {
@@ -49,6 +50,7 @@ struct CategoryGroup: Identifiable, Hashable {
     let name: String
     let categories: [Category]
     let isSynthetic: Bool
+    let sourceRootURL: URL?
 
     var imageCount: Int {
         categories.reduce(0) { $0 + $1.images.count }
