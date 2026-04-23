@@ -41,34 +41,63 @@ struct GeneralLibraryProfile: LibraryProfile {
     }
 }
 
-// Parses a query into search terms.
-// Quoted substrings ("foo bar") are kept as single exact-phrase terms.
-// Unquoted words are individual terms — all must match (implicit AND).
-func parseSearchTerms(_ query: String) -> [String] {
+struct ParsedSearchQuery {
+    let requiredTerms: [String]
+    let excludedTerms: [String]
+
+    var isEmpty: Bool {
+        requiredTerms.isEmpty && excludedTerms.isEmpty
+    }
+}
+
+// Parses a query into search terms. Quoted substrings are kept as exact phrases.
+// Terms prefixed with "-" are exclusions, e.g. `portrait -kitchen`.
+func parseSearchQuery(_ query: String) -> ParsedSearchQuery {
     let foldOptions: String.CompareOptions = [.diacriticInsensitive, .caseInsensitive]
-    var terms: [String] = []
+    var requiredTerms: [String] = []
+    var excludedTerms: [String] = []
     var remaining = query[...]
+
     while !remaining.isEmpty {
-        remaining = remaining.drop(while: { $0 == " " })
+        remaining = remaining.drop(while: { $0.isWhitespace })
         guard !remaining.isEmpty else { break }
+
+        let isExcluded = remaining.first == "-"
+        if isExcluded {
+            remaining = remaining.dropFirst()
+        }
+
+        guard !remaining.isEmpty else { break }
+
+        let term: String
         if remaining.first == "\"" {
             remaining = remaining.dropFirst()
             let end = remaining.firstIndex(of: "\"") ?? remaining.endIndex
-            let phrase = String(remaining[..<end]).trimmingCharacters(in: .whitespaces)
-            if !phrase.isEmpty {
-                terms.append(phrase.folding(options: foldOptions, locale: .current))
-            }
+            term = String(remaining[..<end]).trimmingCharacters(in: .whitespacesAndNewlines)
             remaining = end < remaining.endIndex ? remaining[remaining.index(after: end)...] : remaining[remaining.endIndex...]
         } else {
-            let end = remaining.firstIndex(of: " ") ?? remaining.endIndex
-            let word = String(remaining[..<end])
-            if !word.isEmpty {
-                terms.append(word.folding(options: foldOptions, locale: .current))
-            }
+            let end = remaining.firstIndex(where: { $0.isWhitespace }) ?? remaining.endIndex
+            term = String(remaining[..<end])
             remaining = remaining[end...]
         }
+
+        let normalizedTerm = term
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .folding(options: foldOptions, locale: .current)
+        guard !normalizedTerm.isEmpty else { continue }
+
+        if isExcluded {
+            excludedTerms.append(normalizedTerm)
+        } else {
+            requiredTerms.append(normalizedTerm)
+        }
     }
-    return terms
+
+    return ParsedSearchQuery(requiredTerms: requiredTerms, excludedTerms: excludedTerms)
+}
+
+func parseSearchTerms(_ query: String) -> [String] {
+    parseSearchQuery(query).requiredTerms
 }
 
 private func searchImages(
@@ -80,8 +109,8 @@ private func searchImages(
     guard !trimmedQuery.isEmpty else { return .empty }
 
     let foldOptions: String.CompareOptions = [.diacriticInsensitive, .caseInsensitive]
-    let terms = parseSearchTerms(trimmedQuery)
-    guard !terms.isEmpty else { return .empty }
+    let parsedQuery = parseSearchQuery(trimmedQuery)
+    guard !parsedQuery.isEmpty else { return .empty }
 
     // For ranking, use the full normalised query to detect exact/prefix on single-term searches.
     let normalizedQuery = trimmedQuery.folding(options: foldOptions, locale: .current)
@@ -99,7 +128,8 @@ private func searchImages(
 
     for image in images {
         let normalizedLabel = image.displayLabel.folding(options: foldOptions, locale: .current)
-        guard terms.allSatisfy({ normalizedLabel.contains($0) }) else { continue }
+        guard parsedQuery.requiredTerms.allSatisfy({ normalizedLabel.contains($0) }) else { continue }
+        guard !parsedQuery.excludedTerms.contains(where: { normalizedLabel.contains($0) }) else { continue }
 
         totalMatches += 1
         let currentVisibleCount = exactMatches.count + prefixMatches.count + containsMatches.count
@@ -107,7 +137,7 @@ private func searchImages(
 
         if normalizedLabel == normalizedQuery {
             exactMatches.append(image)
-        } else if terms.count == 1 && normalizedLabel.hasPrefix(normalizedQuery) {
+        } else if parsedQuery.requiredTerms.count == 1 && parsedQuery.excludedTerms.isEmpty && normalizedLabel.hasPrefix(normalizedQuery) {
             prefixMatches.append(image)
         } else {
             containsMatches.append(image)

@@ -448,30 +448,45 @@ final class LibraryStore: ObservableObject {
         let filenameResult = searchTags(matching: query, limit: limit)
         guard !metadataIndexes.isEmpty else { return filenameResult }
 
-        let terms = parseSearchTerms(query)
-        guard !terms.isEmpty else { return filenameResult }
+        let parsedQuery = parseSearchQuery(query)
+        guard !parsedQuery.isEmpty else { return filenameResult }
 
-        // AND across terms, union across all root indexes
-        var metadataPaths: Set<String>? = nil
-        for term in terms {
-            var termPaths = Set<String>()
+        var metadataExcludedPaths = Set<String>()
+        for term in parsedQuery.excludedTerms {
+            metadataExcludedPaths.formUnion(await metadataPaths(containing: term))
+        }
+
+        let filenameImages = metadataExcludedPaths.isEmpty
+            ? filenameResult.images
+            : filenameResult.images.filter { !metadataExcludedPaths.contains($0.id) }
+        let filenamePathSet = Set(filenameImages.map(\.id))
+
+        // AND across required terms, union across all root indexes.
+        var matchingMetadataPaths: Set<String>? = nil
+        if parsedQuery.requiredTerms.isEmpty, !parsedQuery.excludedTerms.isEmpty {
+            var allPaths = Set<String>()
             for index in metadataIndexes.values {
-                for field in MetadataField.allCases {
-                    termPaths.formUnion(await index.imagePaths(where: field, contains: term))
-                }
-                termPaths.formUnion(await index.imagePathsWherePromptContains(term))
+                allPaths.formUnion(await index.allImagePaths())
             }
-            if var accumulated = metadataPaths {
-                accumulated.formIntersection(termPaths)
-                metadataPaths = accumulated
-            } else {
-                metadataPaths = termPaths
+            matchingMetadataPaths = allPaths
+        } else {
+            for term in parsedQuery.requiredTerms {
+                let termPaths = await metadataPaths(containing: term)
+                if var accumulated = matchingMetadataPaths {
+                    accumulated.formIntersection(termPaths)
+                    matchingMetadataPaths = accumulated
+                } else {
+                    matchingMetadataPaths = termPaths
+                }
             }
         }
 
-        let filenamePathSet = Set(filenameResult.images.map(\.id))
-        let newMetadataPaths = (metadataPaths ?? []).subtracting(filenamePathSet)
-        guard !newMetadataPaths.isEmpty else { return filenameResult }
+        let duplicatePathSet = parsedQuery.requiredTerms.isEmpty
+            ? Set(searchIndex.map(\.id))
+            : filenamePathSet
+        let newMetadataPaths = (matchingMetadataPaths ?? [])
+            .subtracting(duplicatePathSet)
+            .subtracting(metadataExcludedPaths)
 
         // Resolve paths: use in-memory item if available, otherwise build lightweight item from path.
         let loadedItems = Dictionary(uniqueKeysWithValues: searchIndex.map { ($0.id, $0) })
@@ -483,11 +498,24 @@ final class LibraryStore: ObservableObject {
             return Self.makeImageItem(from: url, profile: profile)
         }
 
-        let combined = filenameResult.images + metadataImages
+        let excludedVisibleFilenameCount = filenameResult.images.count - filenameImages.count
+        let adjustedFilenameTotal = max(0, filenameResult.totalMatches - excludedVisibleFilenameCount)
+        let combined = filenameImages + metadataImages
         return SearchResult(
             images: Array(combined.prefix(limit)),
-            totalMatches: filenameResult.totalMatches + metadataImages.count
+            totalMatches: adjustedFilenameTotal + metadataImages.count
         )
+    }
+
+    private func metadataPaths(containing term: String) async -> Set<String> {
+        var termPaths = Set<String>()
+        for index in metadataIndexes.values {
+            for field in MetadataField.allCases {
+                termPaths.formUnion(await index.imagePaths(where: field, contains: term))
+            }
+            termPaths.formUnion(await index.imagePathsWherePromptContains(term))
+        }
+        return termPaths
     }
 
     func facetValues(for field: MetadataField) async -> [(value: String, count: Int)] {

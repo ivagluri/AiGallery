@@ -161,6 +161,20 @@ actor MetadataIndex {
         return paths
     }
 
+    func allImagePaths() -> Set<String> {
+        guard let db else { return [] }
+        let sql = "SELECT path FROM indexed_images"
+        var stmt: OpaquePointer?
+        var paths = Set<String>()
+        if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                paths.insert(String(cString: sqlite3_column_text(stmt, 0)))
+            }
+        }
+        sqlite3_finalize(stmt)
+        return paths
+    }
+
     func imagePaths(where field: MetadataField, contains query: String) -> Set<String> {
         guard let db else { return [] }
         let col = field.columnName
