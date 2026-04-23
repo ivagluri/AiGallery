@@ -648,7 +648,10 @@ struct ContentView: View {
                                 }
 
                                 ForEach(additionalMetadataEntries) { entry in
-                                    inspectorRow(humanReadablePNGLabel(for: entry.keyword), entry.value)
+                                    CollapsibleInspectorRow(
+                                        label: humanReadablePNGLabel(for: entry.keyword),
+                                        value: entry.value
+                                    )
                                 }
                             }
                         }
@@ -2723,6 +2726,39 @@ private struct ThumbnailImage: View {
             guard !Task.isCancelled else { return }
 
             loadResult = result
+        }
+    }
+}
+
+private struct CollapsibleInspectorRow: View {
+    let label: String
+    let value: String
+
+    private static let collapseThreshold = 200
+
+    @State private var isExpanded = false
+
+    var body: some View {
+        if value.count > Self.collapseThreshold {
+            DisclosureGroup(isExpanded: $isExpanded) {
+                Text(value)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.top, 8)
+            } label: {
+                Text(label)
+                    .font(.subheadline.weight(.semibold))
+            }
+        } else {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(label)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text(value)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 }
