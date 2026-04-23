@@ -1,5 +1,17 @@
 # Changelog
 
+## v2.0
+
+- **Multiple root folders** — add as many root folders as you like. Each appears as its own collapsible section in the sidebar. Add via the toolbar `+` button or File → Add Root Folder; remove by right-clicking the section header.
+- **Lazy folder loading** — root folders are only scanned when you first expand them, so startup stays fast no matter how many roots are registered.
+- **Cross-root search** — metadata indexes for all registered roots are built in the background immediately, so search and smart filters work across every root even before you've expanded them.
+- **Uniform folder navigation** — every folder in the tree is now a navigation target, including intermediate folders with no direct images (shows an empty grid). The chevron is the only way to expand or collapse; clicking a folder name always navigates.
+- **Removed Legacy Mode** — TagExplorer-style `gens` folder support has been retired. The Mode menu and all associated code have been removed.
+- **Trash from keyboard** — with an image selected, press Delete to move it to trash. Also available from the Image menu and the inspector toolbar.
+- **Reveal in Finder** — available from the inspector toolbar and the thumbnail right-click menu, selecting the file in Finder without leaving the app.
+- **Expanded thumbnail context menu** — right-click any thumbnail to Open, Add/Remove Favorites, Reveal in Finder, Copy Image, Copy File Path, or Move to Trash.
+- **Broader ComfyUI prompt reconstruction** — handles linked-node graphs including concatenated string chains and preview-text-assisted workflows; shows a clear message when reconstruction is not possible instead of dropping metadata silently.
+
 ## v1.2
 
 - **Pure filesystem browsing** — point it at any folder of images and navigate by subfolder. No special folder structure required.
@@ -10,15 +22,3 @@
 - **Click folders to browse** — top-level folders are now selectable, not just collapsible. Clicking a folder shows its images; the arrow expands subfolders.
 - **Legacy mode** — optional compatibility mode for TagExplorer-style `gens` folder layouts (Mode menu).
 
-## Midstream Updates
-
-### 2026-04-22 (`f1d0392..47a4b2b`)
-
-- **Reveal in Finder** — a Reveal in Finder button now appears in the inspector toolbar and in the thumbnail right-click menu, selecting the file in Finder without leaving the app.
-- **Expanded thumbnail context menu** — right-clicking a thumbnail now offers: Open (launches the fullscreen viewer), Add/Remove Favorites (toggles inline, label flips when already set), Reveal in Finder, Copy Image (puts the image on the clipboard), Copy File Path (copies the absolute path as text), and Move to Trash (removes the file and immediately drops it from the grid).
-
-### 2026-04-21 (`be689d2..f1d0392`)
-
-- **Broader ComfyUI prompt reconstruction** — AiGallery now handles more than the simple "prompt is a single text string" case. It can recover prompts from some linked-node ComfyUI graphs, including concatenated string chains and preview-text-assisted workflows.
-- **Clearer ComfyUI fallback behavior** — when AiGallery can still parse useful ComfyUI metadata but cannot rebuild a clean prompt string, the inspector now says `Unable to reconstruct prompt from ComfyUI nodes` instead of pretending success or dropping the rest of the metadata.
-- **Added local ComfyUI edge-case samples** — the test library now includes a fresh ComfyUI sample plus an intentionally broken variant for checking how prompt reconstruction and fallback messaging behave.
