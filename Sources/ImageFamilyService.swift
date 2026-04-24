@@ -1,6 +1,6 @@
 import Foundation
 
-enum ImageFamilyService {
+enum KinService {
 
     static let minimumScore = 35
     static let maxResults = 20
@@ -18,11 +18,11 @@ enum ImageFamilyService {
     }
 
     // Returns nil if the candidate scores below minimumScore.
-    static func evaluate(_ candidate: CandidateInput, source: SourceContext) -> ImageFamilyMatch? {
+    static func evaluate(_ candidate: CandidateInput, source: SourceContext) -> KinMatch? {
         guard candidate.item.id != source.item.id else { return nil }
 
         var score = 0
-        var reasons: [ImageFamilyReason] = []
+        var reasons: [KinReason] = []
 
         // Folder proximity
         if candidate.isSameFolder {
@@ -87,7 +87,7 @@ enum ImageFamilyService {
 
         guard score >= minimumScore else { return nil }
 
-        return ImageFamilyMatch(
+        return KinMatch(
             image: candidate.item,
             relationship: relationship(for: reasons),
             score: score,
@@ -95,7 +95,7 @@ enum ImageFamilyService {
         )
     }
 
-    static func relationship(for reasons: [ImageFamilyReason]) -> ImageRelationship {
+    static func relationship(for reasons: [KinReason]) -> KinRelationship {
         if reasons.contains(.upscaleDimensions) { return .upscale }
         if reasons.contains(.sameSeed)
             || (reasons.contains(.sameModel)

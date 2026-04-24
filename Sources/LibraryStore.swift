@@ -433,7 +433,7 @@ final class LibraryStore: ObservableObject {
         return metadata.hasVisibleContent ? metadata : nil
     }
 
-    func familyMatches(for image: ImageItem) async -> [ImageFamilyMatch] {
+    func kinMatches(for image: ImageItem) async -> [KinMatch] {
         guard !metadataIndexes.isEmpty else { return [] }
 
         // Source context: prompt from PNG (most accurate), index row for model/seed/dims/modDate.
@@ -443,7 +443,7 @@ final class LibraryStore: ObservableObject {
             if let r = await index.metadata(for: image.id) { sourceRow = r; break }
         }
 
-        let context = ImageFamilyService.SourceContext(
+        let context = KinService.SourceContext(
             item: image,
             prompt: sourceMeta?.prompt,
             row: sourceRow
@@ -498,7 +498,7 @@ final class LibraryStore: ObservableObject {
 
         // Score all candidates.
         let profile = GeneralLibraryProfile()
-        var matches: [ImageFamilyMatch] = []
+        var matches: [KinMatch] = []
         for path in candidatePaths {
             let url = URL(fileURLWithPath: path)
             guard let item = itemsByPath[path]
@@ -510,17 +510,17 @@ final class LibraryStore: ObservableObject {
                 if let r = await index.metadata(for: path) { candidateRow = r; break }
             }
 
-            let input = ImageFamilyService.CandidateInput(
+            let input = KinService.CandidateInput(
                 item: item,
                 row: candidateRow,
                 isSameFolder: sameFolderPaths.contains(path)
             )
-            if let match = ImageFamilyService.evaluate(input, source: context) {
+            if let match = KinService.evaluate(input, source: context) {
                 matches.append(match)
             }
         }
 
-        return Array(matches.sorted { $0.score > $1.score }.prefix(ImageFamilyService.maxResults))
+        return Array(matches.sorted { $0.score > $1.score }.prefix(KinService.maxResults))
     }
 
     func temporaryInspectionImage(for fileURL: URL) -> ImageItem? {

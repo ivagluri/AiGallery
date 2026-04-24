@@ -39,10 +39,11 @@ struct ContentView: View {
     @State private var newSmartFilterQuery = ""
     @State private var smartFilterRenameID: UUID?
     @State private var smartFilterRenameDraft = ""
-    @State private var isFamilyTreeActive = false
-    @State private var familyTreeMatches: [ImageFamilyMatch] = []
-    @State private var isFamilyTreeLoading = false
-    @State private var familyTreeSourceImage: ImageItem?
+    @State private var isKinActive = false
+    @State private var kinMatches: [KinMatch] = []
+    @State private var isKinLoading = false
+    @State private var kinSourceImage: ImageItem?
+    @State private var kinHistory: [ImageItem] = []
 
     var body: some View {
         NavigationSplitView {
@@ -515,7 +516,7 @@ struct ContentView: View {
     ) -> some View {
         Button {
             if isSearching { clearSearch() }
-            if isFamilyTreeActive { isFamilyTreeActive = false }
+            if isKinActive { isKinActive = false; kinHistory = [] }
             relinquishSearchFocus()
             clearDroppedInspection()
             library.selectCategory(category)
@@ -551,15 +552,15 @@ struct ContentView: View {
         .tag(category.id)
     }
 
-    private var familyTreeTaskID: String {
-        guard isFamilyTreeActive else { return "" }
-        return familyTreeSourceImage?.id ?? ""
+    private var kinTaskID: String {
+        guard isKinActive else { return "" }
+        return kinSourceImage?.id ?? ""
     }
 
     private var thumbnailGrid: some View {
         Group {
-            if isFamilyTreeActive {
-                familyTreeView
+            if isKinActive {
+                kinView
             } else if isSearching {
                 VStack(spacing: 0) {
                     gridControls(title: "Search Results", subtitle: searchResultsSummary, showSaveSearch: true)
@@ -600,14 +601,14 @@ struct ContentView: View {
                 PlaceholderView(title: "Choose a Category", systemImage: "photo.on.rectangle")
             }
         }
-        .task(id: familyTreeTaskID) {
-            guard isFamilyTreeActive, let image = displayedSelectedImage else {
-                familyTreeMatches = []
+        .task(id: kinTaskID) {
+            guard isKinActive, let image = kinSourceImage else {
+                kinMatches = []
                 return
             }
-            isFamilyTreeLoading = true
-            familyTreeMatches = await library.familyMatches(for: image)
-            isFamilyTreeLoading = false
+            isKinLoading = true
+            kinMatches = await library.kinMatches(for: image)
+            isKinLoading = false
         }
     }
 
@@ -866,7 +867,7 @@ struct ContentView: View {
                 Spacer(minLength: 12)
 
                 previewButton
-                familyTreeButton
+                kinButton
                 filterBarToggleButton
                 sortButton
                 thumbnailSizeControl
@@ -881,7 +882,7 @@ struct ContentView: View {
 
                 HStack(spacing: 16) {
                     previewButton
-                    familyTreeButton
+                    kinButton
                     filterBarToggleButton
                     sortButton
                     Spacer(minLength: 8)
@@ -897,7 +898,7 @@ struct ContentView: View {
                 }
 
                 previewButton
-                familyTreeButton
+                kinButton
                 filterBarToggleButton
                 sortButton
 
@@ -1171,38 +1172,39 @@ struct ContentView: View {
         .help("Adjust thumbnail size")
     }
 
-    private var familyTreeButton: some View {
+    private var kinButton: some View {
         Button {
-            if !isFamilyTreeActive {
-                familyTreeSourceImage = displayedSelectedImage
+            if !isKinActive {
+                kinSourceImage = displayedSelectedImage
+                kinHistory = []
             }
-            isFamilyTreeActive.toggle()
+            isKinActive.toggle()
         } label: {
-            Label("Family Tree", systemImage: "point.3.connected.trianglepath.dotted")
+            Label("Kin", systemImage: "point.3.connected.trianglepath.dotted")
         }
         .labelStyle(.iconOnly)
-        .help(isFamilyTreeActive ? "Exit Family Tree" : "Show Image Family Tree")
-        .disabled(displayedSelectedImage == nil && !isFamilyTreeActive)
-        .foregroundStyle(isFamilyTreeActive ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(Color.primary))
+        .help(isKinActive ? "Exit Kin View" : "Show Kin")
+        .disabled(displayedSelectedImage == nil && !isKinActive)
+        .foregroundStyle(isKinActive ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(Color.primary))
     }
 
     @ViewBuilder
-    private var familyTreeView: some View {
+    private var kinView: some View {
         VStack(spacing: 0) {
-            familyTreeControls
-            if isFamilyTreeLoading {
-                ProgressView("Finding related images…")
+            kinControls
+            if isKinLoading {
+                ProgressView("Finding kin…")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if familyTreeMatches.isEmpty {
+            } else if kinMatches.isEmpty {
                 PlaceholderView(
-                    title: "No Related Images",
+                    title: "No Kin Found",
                     systemImage: "point.3.connected.trianglepath.dotted",
                     description: "No related images were found for this image."
                 )
             } else {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 24, pinnedViews: []) {
-                        ForEach(groupedFamilyMatches, id: \.0.displayName) { relationship, matches in
+                        ForEach(groupedKinMatches, id: \.0.displayName) { relationship, matches in
                             VStack(alignment: .leading, spacing: 10) {
                                 Text(relationship.displayName)
                                     .font(.headline)
@@ -1210,7 +1212,7 @@ struct ContentView: View {
 
                                 LazyVGrid(columns: gridColumns, spacing: 16) {
                                     ForEach(matches) { match in
-                                        familyThumbnail(for: match)
+                                        kinThumbnail(for: match)
                                     }
                                 }
                                 .padding(.horizontal, 20)
@@ -1223,27 +1225,47 @@ struct ContentView: View {
         }
     }
 
-    private var familyTreeControls: some View {
+    private var kinControls: some View {
         HStack(spacing: 12) {
             Button {
-                isFamilyTreeActive = false
+                if let prev = kinHistory.popLast() {
+                    kinSourceImage = prev
+                } else {
+                    isKinActive = false
+                }
             } label: {
                 Label("Back", systemImage: "chevron.left")
             }
             .labelStyle(.iconOnly)
-            .help("Return to Library")
+            .help(kinHistory.isEmpty ? "Return to Library" : "Back")
 
-            if let image = familyTreeSourceImage {
-                Text("Family Tree: \(image.displayName)")
+            if let image = kinSourceImage {
+                Text("Kin: \(image.displayName)")
                     .font(.headline)
                     .lineLimit(1)
                     .truncationMode(.middle)
             } else {
-                Text("Family Tree")
+                Text("Kin")
                     .font(.headline)
             }
 
             Spacer()
+
+            // Pivot: show kin of the currently inspected image (if different from source).
+            Button {
+                if let current = displayedSelectedImage, current.id != kinSourceImage?.id {
+                    if let src = kinSourceImage { kinHistory.append(src) }
+                    kinSourceImage = current
+                }
+            } label: {
+                Label("Kin of This Image", systemImage: "point.3.connected.trianglepath.dotted")
+            }
+            .labelStyle(.iconOnly)
+            .help("Show kin of the inspected image")
+            .disabled(displayedSelectedImage == nil
+                || displayedSelectedImage?.id == kinSourceImage?.id)
+
+            previewButton
             thumbnailSizeControl
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -1257,46 +1279,30 @@ struct ContentView: View {
         }
     }
 
-    private var groupedFamilyMatches: [(ImageRelationship, [ImageFamilyMatch])] {
-        let order: [ImageRelationship] = [.sibling, .variant, .upscale, .related]
+    private var groupedKinMatches: [(KinRelationship, [KinMatch])] {
+        let order: [KinRelationship] = [.sibling, .variant, .upscale, .related]
         return order.compactMap { rel in
-            let group = familyTreeMatches.filter { $0.relationship == rel }
+            let group = kinMatches.filter { $0.relationship == rel }
             return group.isEmpty ? nil : (rel, group)
         }
     }
 
-    private func familyThumbnail(for match: ImageFamilyMatch) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            ThumbnailCell(
-                image: match.image,
-                isSelected: match.image.id == displayedSelectedImage?.id,
-                thumbnailHeight: thumbnailSize,
-                isFavorite: library.isFavorite(match.image),
-                suspendThumbnailLoading: false,
-                onSelect: { selectFamilyMatch(match.image) },
-                onOpenPreview: { openPreview(for: match.image) },
-                onToggleFavorite: { library.toggleFavorite(match.image) },
-                onTrash: { library.trashImage(match.image) }
-            )
-
-            if !match.reasons.isEmpty {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 4) {
-                        ForEach(match.reasons, id: \.rawValue) { reason in
-                            Text(reason.rawValue)
-                                .font(.caption2)
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 2)
-                                .background(Capsule().fill(Color.accentColor.opacity(0.12)))
-                                .foregroundStyle(Color.accentColor)
-                        }
-                    }
-                }
-            }
-        }
+    private func kinThumbnail(for match: KinMatch) -> some View {
+        ThumbnailCell(
+            image: match.image,
+            isSelected: match.image.id == displayedSelectedImage?.id,
+            thumbnailHeight: thumbnailSize,
+            isFavorite: library.isFavorite(match.image),
+            suspendThumbnailLoading: false,
+            onSelect: { selectKinMatch(match.image) },
+            onOpenPreview: { openPreview(for: match.image) },
+            onToggleFavorite: { library.toggleFavorite(match.image) },
+            onTrash: { library.trashImage(match.image) }
+        )
+        .help(match.reasons.map(\.rawValue).joined(separator: " · "))
     }
 
-    private func selectFamilyMatch(_ image: ImageItem) {
+    private func selectKinMatch(_ image: ImageItem) {
         let category = library.categories.first { $0.images.contains { $0.id == image.id } }
         if let category {
             library.selectCategory(category)

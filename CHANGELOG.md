@@ -2,10 +2,12 @@
 
 ## Midstream changes
 
-### 2026-04-23 · 846b139..HEAD
+### 2026-04-23 · 846b139..46da719
 
-- **Image Family Tree** — select any image and open the Family Tree view from the grid toolbar to see related images grouped as Siblings, Variants, Possible Upscales, and Related. Each match shows reason chips explaining why it appeared. Clicking a thumbnail updates the inspector without leaving the tree; the Back button returns to the library. Navigating via the sidebar dismisses the tree.
-- **Seed added to metadata index** — generation seed is now stored in the SQLite index alongside model, prompt, and other fields, enabling reliable same-seed variant detection in Family Tree results. Triggers a one-time background re-index on first launch.
+- **Kin view** — select any image and open the Kin view from the grid toolbar to see related images grouped as Same Batch, Variants, Possible Upscales, and Related. Hover a thumbnail to see the reason chips that explain why it appeared. Clicking a thumbnail updates the inspector without leaving Kin view; the Back button returns to the library. Navigating via the sidebar dismisses Kin view.
+- **Kin pivot / history** — while in Kin view, clicking the Kin icon in the control strip pivots to show kin of the currently inspected image; the Back button steps through pivot history before returning to the library.
+- **Preview and zoom controls in Kin view** — the Kin control strip now includes the fullscreen preview button and thumbnail zoom control alongside the Back and pivot buttons.
+- **Seed added to metadata index** — generation seed is now stored in the SQLite index alongside model, prompt, and other fields, enabling reliable same-seed variant detection in Kin results. Triggers a one-time background re-index on first launch.
 - **Smart filters and search work across unloaded roots** — registered root folders that haven't been expanded yet now contribute to smart filter results and text search from the moment their background index scan completes, without requiring the folder to be loaded first.
 
 ## v2.0

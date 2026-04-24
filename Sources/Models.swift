@@ -104,17 +104,17 @@ struct MetadataFilter: Identifiable, Hashable {
     }
 }
 
-// MARK: - Family Tree
+// MARK: - Kin
 
-struct ImageFamilyMatch: Identifiable {
+struct KinMatch: Identifiable {
     var id: String { image.id }
     let image: ImageItem
-    let relationship: ImageRelationship
+    let relationship: KinRelationship
     let score: Int
-    let reasons: [ImageFamilyReason]
+    let reasons: [KinReason]
 }
 
-enum ImageRelationship {
+enum KinRelationship {
     case sibling
     case variant
     case upscale
@@ -130,7 +130,7 @@ enum ImageRelationship {
     }
 }
 
-enum ImageFamilyReason: String {
+enum KinReason: String {
     case samePrompt        = "same prompt"
     case similarPrompt     = "similar prompt"
     case sameSeed          = "same seed"
