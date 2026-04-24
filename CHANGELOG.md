@@ -2,13 +2,15 @@
 
 ## Midstream changes
 
-### 2026-04-23 · 846b139..46da719
+### 2026-04-23 · 846b139..HEAD
 
 - **Kin view** — select any image and open the Kin view from the grid toolbar to see related images grouped as Same Batch, Variants, Possible Upscales, and Related. Hover a thumbnail to see the reason chips that explain why it appeared. Clicking a thumbnail updates the inspector without leaving Kin view; the Back button returns to the library. Navigating via the sidebar dismisses Kin view.
 - **Kin pivot / history** — while in Kin view, clicking the Kin icon in the control strip pivots to show kin of the currently inspected image; the Back button steps through pivot history before returning to the library.
 - **Preview and zoom controls in Kin view** — the Kin control strip now includes the fullscreen preview button and thumbnail zoom control alongside the Back and pivot buttons.
 - **Seed added to metadata index** — generation seed is now stored in the SQLite index alongside model, prompt, and other fields, enabling reliable same-seed variant detection in Kin results. Triggers a one-time background re-index on first launch.
 - **Smart filters and search work across unloaded roots** — registered root folders that haven't been expanded yet now contribute to smart filter results and text search from the moment their background index scan completes, without requiring the folder to be loaded first.
+- **Prompt Diff Viewer** — click the new Compare button (⊞) in the inspector's action strip to pin the current image as A, then click any other image to see a side-by-side diff. The inspector shows A peeking behind B as a stacked-card visual, followed by a diff panel: prompt tags highlighted green (added) or red/struck-through (removed), and a parameter table with changed rows surfaced first. Click the Compare button again, press Escape, or navigate the sidebar to exit compare mode.
+- **Inspector action strip** — the path disclosure toggle and inline path field have been replaced by a clean centered row of four icon buttons: Reveal in Finder, Copy Path, Compare, and Trash. The Compare icon tints accent when active.
 
 ## v2.0
 

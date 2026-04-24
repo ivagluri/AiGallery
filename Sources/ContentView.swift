@@ -13,7 +13,6 @@ struct ContentView: View {
     @State private var searchText = ""
     @State private var activeSearchText = ""
     @State private var expandedGroupIDs: Set<String> = []
-    @State private var isPathExpanded = false
     @State private var isInfoExpanded = true
     @State private var isPositivePromptExpanded = true
     @State private var isNegativePromptExpanded = true
@@ -44,6 +43,7 @@ struct ContentView: View {
     @State private var isKinLoading = false
     @State private var kinSourceImage: ImageItem?
     @State private var kinHistory: [ImageItem] = []
+    @State private var diffAnchorImage: ImageItem?
 
     var body: some View {
         NavigationSplitView {
@@ -517,6 +517,7 @@ struct ContentView: View {
         Button {
             if isSearching { clearSearch() }
             if isKinActive { isKinActive = false; kinHistory = [] }
+            if diffAnchorImage != nil { diffAnchorImage = nil }
             relinquishSearchFocus()
             clearDroppedInspection()
             library.selectCategory(category)
@@ -639,16 +640,35 @@ struct ContentView: View {
                         temporaryInspectionBanner
                     }
 
-                    pathDisclosure(for: image)
+                    imageActionStrip(for: image)
 
                     LargePreview(imageURL: image.fileURL)
                         .frame(maxWidth: .infinity)
+                        .shadow(
+                            color: (diffAnchorImage?.id != image.id) ? Color.black.opacity(0.22) : Color.clear,
+                            radius: 10, x: -3, y: 4
+                        )
                         .overlay(alignment: .topTrailing) {
                             if !isInspectingDroppedImage {
                                 previewFavoriteButton(for: image)
                                     .padding(12)
                             }
                         }
+                        .background(alignment: .topLeading) {
+                            if let anchor = diffAnchorImage, anchor.id != image.id {
+                                LargePreview(imageURL: anchor.fileURL)
+                                    .rotationEffect(.degrees(4), anchor: .bottomLeading)
+                                    .offset(x: 22, y: 14)
+                                    .opacity(0.72)
+                                    .allowsHitTesting(false)
+                            }
+                        }
+                        .padding(.bottom, (diffAnchorImage?.id != image.id) ? 16 : 0)
+                        .padding(.trailing, (diffAnchorImage?.id != image.id) ? 24 : 0)
+
+                    if let anchor = diffAnchorImage, anchor.id != image.id {
+                        diffBanner(anchor: anchor, current: image, currentMetadata: metadata)
+                    }
 
                     if hasInfoContent {
                         InspectorSection("Info", isExpanded: $isInfoExpanded) {
@@ -698,68 +718,49 @@ struct ContentView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private func pathDisclosure(for image: ImageItem) -> some View {
-        HStack(spacing: 10) {
-            Button {
-                withAnimation(.easeInOut(duration: 0.18)) {
-                    isPathExpanded.toggle()
-                }
-            } label: {
-                HStack(spacing: 10) {
-                    Image(systemName: isPathExpanded ? "chevron.right" : "chevron.left")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(isPathExpanded ? Color.accentColor : Color.secondary)
-                        .frame(width: 12)
-
-                    Text("Path")
-                        .font(.subheadline.weight(.semibold))
-                }
-                .contentShape(Rectangle())
+    private func imageActionStrip(for image: ImageItem) -> some View {
+        HStack(spacing: 16) {
+            Button { revealInFinder(image.fileURL) } label: {
+                Image(systemName: "folder")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(Color.secondary)
+                    .frame(width: 24, height: 24)
             }
             .buttonStyle(.plain)
+            .help("Reveal in Finder")
 
-            if isPathExpanded {
-                pathInlineField(image.fileURL.path)
-                    .transition(.move(edge: .trailing).combined(with: .opacity))
-            } else {
-                Spacer(minLength: 0)
+            Button { copyInspectorValue(image.fileURL.path) } label: {
+                Image(systemName: copiedInspectorValue == image.fileURL.path ? "checkmark" : "doc.on.doc")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(copiedInspectorValue == image.fileURL.path ? Color.accentColor : Color.secondary)
+                    .frame(width: 24, height: 24)
             }
+            .buttonStyle(.plain)
+            .help("Copy Path")
 
-            HStack(spacing: 4) {
-                Button {
-                    revealInFinder(image.fileURL)
-                } label: {
-                    Image(systemName: "folder")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(Color.secondary)
-                        .frame(width: 24, height: 24)
+            Button {
+                withAnimation(.none) {
+                    diffAnchorImage = (diffAnchorImage?.id == image.id) ? nil : image
                 }
-                .buttonStyle(.plain)
-                .help("Reveal in Finder")
-
-                Button {
-                    copyInspectorValue(image.fileURL.path)
-                } label: {
-                    Image(systemName: copiedInspectorValue == image.fileURL.path ? "checkmark" : "doc.on.doc")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(copiedInspectorValue == image.fileURL.path ? Color.accentColor : Color.secondary)
-                        .frame(width: 24, height: 24)
-                }
-                .buttonStyle(.plain)
-                .help("Copy Path")
-
-                Button {
-                    library.trashImage(image)
-                } label: {
-                    Image(systemName: "trash")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(Color.red.opacity(0.7))
-                        .frame(width: 24, height: 24)
-                }
-                .buttonStyle(.plain)
-                .help("Move to Trash")
+            } label: {
+                Image(systemName: "square.split.2x1")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(diffAnchorImage?.id == image.id ? Color.accentColor : Color.secondary)
+                    .frame(width: 24, height: 24)
             }
+            .buttonStyle(.plain)
+            .help(diffAnchorImage?.id == image.id ? "Stop Comparing" : "Compare with Another Image")
+
+            Button { library.trashImage(image) } label: {
+                Image(systemName: "trash")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(Color.red.opacity(0.7))
+                    .frame(width: 24, height: 24)
+            }
+            .buttonStyle(.plain)
+            .help("Move to Trash")
         }
+        .frame(maxWidth: .infinity)
         .frame(height: 38)
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
@@ -783,27 +784,6 @@ struct ContentView: View {
         )
     }
 
-    private func pathInlineField(_ path: String) -> some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            Text(path)
-                .font(.system(.caption, design: .monospaced))
-                .textSelection(.enabled)
-                .lineLimit(1)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 5)
-        }
-        .frame(height: 26)
-        .background(
-            RoundedRectangle(cornerRadius: 8)
-                .fill(Color(nsColor: .controlBackgroundColor))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 8)
-                .stroke(Color.primary.opacity(colorScheme == .dark ? 0.10 : 0.08), lineWidth: 1)
-        )
-    }
-
     private func copyInspectorValue(_ value: String) {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(value, forType: .string)
@@ -817,6 +797,105 @@ struct ContentView: View {
 
         copiedInspectorResetTask = resetTask
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.2, execute: resetTask)
+    }
+
+    // MARK: - Diff Banner
+
+    private func diffBanner(anchor: ImageItem, current: ImageItem, currentMetadata: ImageMetadata?) -> some View {
+        let anchorMetadata = library.inspectorMetadata(for: anchor)
+        let diff = PromptDiffService.diff(a: anchorMetadata, b: currentMetadata)
+
+        return VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 6) {
+                Image(systemName: "square.split.2x1")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text(anchor.displayName)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                Image(systemName: "arrow.right")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                Text(current.displayName)
+                    .font(.caption)
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                Spacer()
+                Button { diffAnchorImage = nil } label: {
+                    Image(systemName: "xmark")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(Color.secondary)
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+
+            if !diff.promptTokens.isEmpty {
+                Divider()
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Positive Prompt")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    DiffTagFlowView(tokens: diff.promptTokens)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+            }
+
+            if !diff.negativeTokens.isEmpty {
+                Divider()
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Negative Prompt")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    DiffTagFlowView(tokens: diff.negativeTokens)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+            }
+
+            if !diff.parameterDiffs.isEmpty {
+                Divider()
+                VStack(alignment: .leading, spacing: 0) {
+                    Text("Parameters")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 12)
+                        .padding(.top, 8)
+                        .padding(.bottom, 4)
+                    ForEach(Array(diff.parameterDiffs.enumerated()), id: \.offset) { _, row in
+                        let changed = row.aValue != row.bValue
+                        HStack(spacing: 8) {
+                            Text(row.key)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .frame(minWidth: 60, alignment: .leading)
+                            Text(row.aValue ?? "—")
+                                .font(.caption)
+                                .foregroundStyle(changed ? Color.red.opacity(0.8) : Color.primary)
+                            if changed {
+                                Image(systemName: "arrow.right")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                Text(row.bValue ?? "—")
+                                    .font(.caption)
+                                    .foregroundStyle(Color.green.opacity(0.9))
+                            }
+                            Spacer()
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 3)
+                        .background(changed ? Color.accentColor.opacity(0.08) : Color.clear)
+                    }
+                    .padding(.bottom, 8)
+                }
+            }
+        }
+        .background(RoundedRectangle(cornerRadius: 10).fill(Color(nsColor: .controlBackgroundColor)))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.primary.opacity(0.08), lineWidth: 1))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 
     private var imageSortOrder: ImageSortOrder {
@@ -1707,6 +1786,11 @@ private func isCollapsedActiveNode(_ node: SidebarNode) -> Bool {
             !previewController.isPresented
         else {
             return false
+        }
+
+        // keyCode 53 = Escape — clear diff anchor without consuming the event
+        if event.keyCode == 53, diffAnchorImage != nil {
+            diffAnchorImage = nil
         }
 
         if let previewEventResult = handlePreviewHotkey(event) {
@@ -3000,5 +3084,84 @@ struct PlaceholderView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(24)
+    }
+}
+
+// MARK: - Diff Tag Views
+
+private struct DiffTagFlowView: View {
+    let tokens: [DiffToken]
+
+    var body: some View {
+        DiffFlowLayout(spacing: 4) {
+            ForEach(Array(tokens.enumerated()), id: \.offset) { _, token in
+                DiffTagChip(token: token)
+            }
+        }
+    }
+}
+
+private struct DiffTagChip: View {
+    let token: DiffToken
+
+    var body: some View {
+        switch token {
+        case .unchanged(let text):
+            chip(text, bg: Color.primary.opacity(0.06), fg: Color.secondary, strikethrough: false)
+        case .added(let text):
+            chip(text, bg: Color.green.opacity(0.15), fg: Color.green, strikethrough: false)
+        case .removed(let text):
+            chip(text, bg: Color.red.opacity(0.10), fg: Color.red.opacity(0.8), strikethrough: true)
+        }
+    }
+
+    private func chip(_ text: String, bg: Color, fg: Color, strikethrough: Bool) -> some View {
+        Text(text)
+            .strikethrough(strikethrough, color: fg)
+            .font(.caption)
+            .foregroundStyle(fg)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 3)
+            .background(RoundedRectangle(cornerRadius: 5).fill(bg))
+    }
+}
+
+private struct DiffFlowLayout: Layout {
+    var spacing: CGFloat = 4
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let maxWidth = proposal.width.flatMap { $0.isFinite ? $0 : nil } ?? CGFloat.greatestFiniteMagnitude
+        var x: CGFloat = 0
+        var y: CGFloat = 0
+        var rowH: CGFloat = 0
+        var usedWidth: CGFloat = 0
+
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            if x > 0, x + size.width > maxWidth {
+                x = 0; y += rowH + spacing; rowH = 0
+            }
+            x += size.width + spacing
+            usedWidth = max(usedWidth, x - spacing)
+            rowH = max(rowH, size.height)
+        }
+        // Return the actual used width, never infinity.
+        return CGSize(width: min(usedWidth, maxWidth), height: y + rowH)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        var x = bounds.minX
+        var y = bounds.minY
+        var rowH: CGFloat = 0
+
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            if x > bounds.minX, x + size.width > bounds.maxX {
+                x = bounds.minX; y += rowH + spacing; rowH = 0
+            }
+            subview.place(at: CGPoint(x: x, y: y), proposal: .unspecified)
+            x += size.width + spacing
+            rowH = max(rowH, size.height)
+        }
     }
 }
