@@ -52,13 +52,15 @@ Generate polished contact sheets from a category or selection: cinematic rows, m
 
 Distilled version: export selected images as a local contact sheet PNG with filename, prompt, and model captions.
 
-## Prompt Diff Viewer
+## Prompt Diff Viewer ✓ Shipped
 
 Select two images and compare their generation metadata like source code: added tags, removed tags, changed sampler, seed, CFG, model, and dimensions.
 
 Distilled version: a "Compare" chip in the inspector freezes the current image as A. The next image the user clicks in the grid becomes B and the diff shows immediately in the inspector — no separate mode UI, no toolbar button, no multi-select rewiring. Clicking anywhere outside the diff (or pressing Escape) clears it. Max two images; three-way diffs are ambiguous and visually crowded.
 
 Diff display: side-by-side prompt text with added words in green, removed words in red, unchanged words muted. Non-prompt fields (model, sampler, seed, CFG, steps, dimensions) shown as a two-column table with changed values highlighted.
+
+Implemented: Compare button (⊞) in the inspector action strip pins A. Selecting any other image becomes B. Inspector shows A peeking behind B as a stacked-card visual (A offset, rotated, dimmed). Below the preview: prompt tag chips (green added, red struck-through removed, muted unchanged) via a wrapping flow layout, then a parameter table with changed rows sorted first and highlighted. Escape or sidebar navigation exits compare mode. `PromptDiffService` is a stateless enum; `DiffToken`/`MetadataDiff` types live in Models.swift.
 
 ## Dream Deck Mode
 
@@ -81,9 +83,9 @@ Distilled version: a "Curiosities" smart collection powered by local rules.
 ## Strongest Prototype Candidates
 
 - ~~Image Family Trees~~ (shipped as Kin)
-- Prompt Diff Viewer
+- ~~Prompt Diff Viewer~~ (shipped)
 - Prompt Constellation Map
 - Timeline Of Obsessions
 - Contact Sheet Storyboards
 
-Prompt Diff Viewer is the likely next strongest prototype because it fits AiGallery's identity, reuses metadata already parsed by the app, and makes the app feel purpose-built for AI image archaeology.
+Prompt Constellation Map is the likely next strongest prototype: it reuses the existing metadata index, requires no ML, and would make the app feel distinctly purpose-built for AI image archaeology.
