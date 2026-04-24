@@ -18,6 +18,17 @@ enum MetadataIndexError: Error {
     case schemaSetupFailed(String)
 }
 
+struct IndexedImageRow {
+    let path: String
+    let modDate: Double
+    let model: String?
+    let prompt: String?
+    let negativePrompt: String?
+    let seed: String?
+    let width: Int?
+    let height: Int?
+}
+
 actor MetadataIndex {
     private var db: OpaquePointer?
     let dbURL: URL
@@ -77,8 +88,8 @@ actor MetadataIndex {
 
         let upsertSQL = """
         INSERT OR REPLACE INTO indexed_images
-        (path,mod_date,model,sampler,scheduler,vae,upscaler,steps,cfg,strength,width,height,source_fmt,prompt,negative_prompt)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        (path,mod_date,model,sampler,scheduler,vae,upscaler,steps,cfg,strength,width,height,source_fmt,prompt,negative_prompt,seed)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """
         var upsert: OpaquePointer?
         guard sqlite3_prepare_v2(db, upsertSQL, -1, &upsert, nil) == SQLITE_OK else { return }
@@ -217,6 +228,47 @@ actor MetadataIndex {
         return paths
     }
 
+    func metadata(for path: String) -> IndexedImageRow? {
+        guard let db else { return nil }
+        let sql = """
+        SELECT path, mod_date, model, prompt, negative_prompt, seed, width, height
+        FROM indexed_images WHERE path = ?
+        """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return nil }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_text(stmt, 1, path, -1, SQLITE_TRANSIENT)
+        guard sqlite3_step(stmt) == SQLITE_ROW else { return nil }
+        let rowPath    = String(cString: sqlite3_column_text(stmt, 0))
+        let modDate    = sqlite3_column_double(stmt, 1)
+        let model      = sqlite3_column_type(stmt, 2) != SQLITE_NULL ? String(cString: sqlite3_column_text(stmt, 2)) : nil
+        let prompt     = sqlite3_column_type(stmt, 3) != SQLITE_NULL ? String(cString: sqlite3_column_text(stmt, 3)) : nil
+        let negPrompt  = sqlite3_column_type(stmt, 4) != SQLITE_NULL ? String(cString: sqlite3_column_text(stmt, 4)) : nil
+        let seed       = sqlite3_column_type(stmt, 5) != SQLITE_NULL ? String(cString: sqlite3_column_text(stmt, 5)) : nil
+        let width      = sqlite3_column_type(stmt, 6) != SQLITE_NULL ? Int(sqlite3_column_int(stmt, 6)) : nil
+        let height     = sqlite3_column_type(stmt, 7) != SQLITE_NULL ? Int(sqlite3_column_int(stmt, 7)) : nil
+        return IndexedImageRow(
+            path: rowPath, modDate: modDate, model: model,
+            prompt: prompt, negativePrompt: negPrompt,
+            seed: seed, width: width, height: height
+        )
+    }
+
+    func imagePaths(withSeed seed: String) -> Set<String> {
+        guard let db else { return [] }
+        let sql = "SELECT path FROM indexed_images WHERE seed = ?"
+        var stmt: OpaquePointer?
+        var paths = Set<String>()
+        if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
+            sqlite3_bind_text(stmt, 1, seed, -1, SQLITE_TRANSIENT)
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                paths.insert(String(cString: sqlite3_column_text(stmt, 0)))
+            }
+        }
+        sqlite3_finalize(stmt)
+        return paths
+    }
+
     // MARK: - Private
 
     private static func createSchema(db: OpaquePointer) throws {
@@ -256,6 +308,9 @@ actor MetadataIndex {
             sqlite3_exec(db, "UPDATE indexed_images SET mod_date = 0", nil, nil, nil)
         }
         sqlite3_exec(db, "ALTER TABLE indexed_images ADD COLUMN negative_prompt TEXT", nil, nil, nil)
+        if sqlite3_exec(db, "ALTER TABLE indexed_images ADD COLUMN seed TEXT", nil, nil, nil) == SQLITE_OK {
+            sqlite3_exec(db, "UPDATE indexed_images SET mod_date = 0", nil, nil, nil)
+        }
     }
 
     private func removePaths(_ paths: Set<String>) {
@@ -287,6 +342,7 @@ actor MetadataIndex {
         var sourceFmt: String?
         var prompt: String?
         var negativePrompt: String?
+        var seed: String?
     }
 
     private static func extractRow(for image: ImageItem, modDate: Double) -> IndexRow {
@@ -347,11 +403,13 @@ actor MetadataIndex {
         let negativePrompt = (pngMeta?.negativePrompt ?? folderMeta?.negativePrompt)
             .flatMap { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0.trimmingCharacters(in: .whitespacesAndNewlines) }
 
+        let seed = param("Seed", in: params)
+
         return IndexRow(
             modDate: modDate, model: model, sampler: sampler, scheduler: scheduler,
             vae: vae, upscaler: upscaler, steps: steps, cfg: cfg, strength: strength,
             width: width, height: height, sourceFmt: fmt,
-            prompt: prompt, negativePrompt: negativePrompt
+            prompt: prompt, negativePrompt: negativePrompt, seed: seed
         )
     }
 
@@ -440,6 +498,7 @@ actor MetadataIndex {
         bindText           (stmt, 13, row.sourceFmt)
         bindText           (stmt, 14, row.prompt)
         bindText           (stmt, 15, row.negativePrompt)
+        bindText           (stmt, 16, row.seed)
     }
 
     private static func bindText(_ s: OpaquePointer, _ i: Int32, _ v: String?) {

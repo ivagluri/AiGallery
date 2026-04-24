@@ -103,3 +103,40 @@ struct MetadataFilter: Identifiable, Hashable {
         self.value = value
     }
 }
+
+// MARK: - Family Tree
+
+struct ImageFamilyMatch: Identifiable {
+    var id: String { image.id }
+    let image: ImageItem
+    let relationship: ImageRelationship
+    let score: Int
+    let reasons: [ImageFamilyReason]
+}
+
+enum ImageRelationship {
+    case sibling
+    case variant
+    case upscale
+    case related
+
+    var displayName: String {
+        switch self {
+        case .sibling: return "Same Batch"
+        case .variant: return "Variants"
+        case .upscale: return "Possible Upscales"
+        case .related: return "Related"
+        }
+    }
+}
+
+enum ImageFamilyReason: String {
+    case samePrompt        = "same prompt"
+    case similarPrompt     = "similar prompt"
+    case sameSeed          = "same seed"
+    case sameModel         = "same model"
+    case sameFolder        = "same folder"
+    case filenamePattern   = "nearby filename"
+    case closeTimestamp    = "close timestamp"
+    case upscaleDimensions = "larger dimensions"
+}
