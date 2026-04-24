@@ -1,5 +1,13 @@
 # Changelog
 
+## Midstream changes
+
+### 2026-04-23 · 846b139..HEAD
+
+- **Image Family Tree** — select any image and open the Family Tree view from the grid toolbar to see related images grouped as Siblings, Variants, Possible Upscales, and Related. Each match shows reason chips explaining why it appeared. Clicking a thumbnail updates the inspector without leaving the tree; the Back button returns to the library. Navigating via the sidebar dismisses the tree.
+- **Seed added to metadata index** — generation seed is now stored in the SQLite index alongside model, prompt, and other fields, enabling reliable same-seed variant detection in Family Tree results. Triggers a one-time background re-index on first launch.
+- **Smart filters and search work across unloaded roots** — registered root folders that haven't been expanded yet now contribute to smart filter results and text search from the moment their background index scan completes, without requiring the folder to be loaded first.
+
 ## v2.0
 
 - **Multiple root folders** — add as many root folders as you like. Each appears as its own collapsible section in the sidebar. Add via the toolbar `+` button or File → Add Root Folder; remove by right-clicking the section header.

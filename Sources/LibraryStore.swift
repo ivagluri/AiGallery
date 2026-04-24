@@ -433,6 +433,96 @@ final class LibraryStore: ObservableObject {
         return metadata.hasVisibleContent ? metadata : nil
     }
 
+    func familyMatches(for image: ImageItem) async -> [ImageFamilyMatch] {
+        guard !metadataIndexes.isEmpty else { return [] }
+
+        // Source context: prompt from PNG (most accurate), index row for model/seed/dims/modDate.
+        let sourceMeta = inspectorMetadata(for: image)
+        var sourceRow: IndexedImageRow? = nil
+        for index in metadataIndexes.values {
+            if let r = await index.metadata(for: image.id) { sourceRow = r; break }
+        }
+
+        let context = ImageFamilyService.SourceContext(
+            item: image,
+            prompt: sourceMeta?.prompt,
+            row: sourceRow
+        )
+
+        // Build a path → item lookup once.
+        let itemsByPath = Dictionary(uniqueKeysWithValues: allImages.map { ($0.id, $0) })
+
+        // 1. Same-folder candidates (always included, no index needed).
+        let folderPath = image.fileURL.deletingLastPathComponent().path
+        let sameFolderItems = allImages.filter {
+            $0.id != image.id
+                && $0.fileURL.deletingLastPathComponent().path == folderPath
+        }
+        var candidatePaths = Set(sameFolderItems.map(\.id))
+        let sameFolderPaths = candidatePaths
+
+        // 2. Same-seed candidates (cross-library, capped at 30 new).
+        if let seed = sourceRow?.seed, !seed.isEmpty {
+            var seedPaths = Set<String>()
+            for index in metadataIndexes.values {
+                seedPaths.formUnion(await index.imagePaths(withSeed: seed))
+            }
+            let novel = Array(seedPaths.subtracting(candidatePaths).subtracting([image.id])).prefix(30)
+            candidatePaths.formUnion(novel)
+        }
+
+        // 3. Same-model candidates (cross-library, capped at 30 new).
+        if let model = sourceRow?.model, !model.isEmpty {
+            var modelPaths = Set<String>()
+            for index in metadataIndexes.values {
+                modelPaths.formUnion(await index.imagePaths(matching: [MetadataFilter(field: .model, value: model)]))
+            }
+            let novel = Array(modelPaths.subtracting(candidatePaths).subtracting([image.id])).prefix(30)
+            candidatePaths.formUnion(novel)
+        }
+
+        // 4. Prompt-keyword candidates — most distinctive word (length > 4), capped at 20 new.
+        if let prompt = sourceMeta?.prompt, !prompt.isEmpty {
+            let keyword = prompt
+                .components(separatedBy: .whitespacesAndNewlines)
+                .first { $0.count > 4 }
+            if let keyword {
+                var promptPaths = Set<String>()
+                for index in metadataIndexes.values {
+                    promptPaths.formUnion(await index.imagePathsWherePromptContains(keyword))
+                }
+                let novel = Array(promptPaths.subtracting(candidatePaths).subtracting([image.id])).prefix(20)
+                candidatePaths.formUnion(novel)
+            }
+        }
+
+        // Score all candidates.
+        let profile = GeneralLibraryProfile()
+        var matches: [ImageFamilyMatch] = []
+        for path in candidatePaths {
+            let url = URL(fileURLWithPath: path)
+            guard let item = itemsByPath[path]
+                ?? (Self.isSupportedImage(url) ? Self.makeImageItem(from: url, profile: profile) : nil)
+            else { continue }
+
+            var candidateRow: IndexedImageRow? = nil
+            for index in metadataIndexes.values {
+                if let r = await index.metadata(for: path) { candidateRow = r; break }
+            }
+
+            let input = ImageFamilyService.CandidateInput(
+                item: item,
+                row: candidateRow,
+                isSameFolder: sameFolderPaths.contains(path)
+            )
+            if let match = ImageFamilyService.evaluate(input, source: context) {
+                matches.append(match)
+            }
+        }
+
+        return Array(matches.sorted { $0.score > $1.score }.prefix(ImageFamilyService.maxResults))
+    }
+
     func temporaryInspectionImage(for fileURL: URL) -> ImageItem? {
         guard fileURL.pathExtension.lowercased() == "png", Self.isSupportedImage(fileURL) else { return nil }
         return Self.makeImageItem(from: fileURL, profile: GeneralLibraryProfile())
@@ -685,6 +775,15 @@ final class LibraryStore: ObservableObject {
                     images = (try? await Task.detached(priority: .background) {
                         try Self.buildLibrary(rootURL: url, profile: profile).searchIndex
                     }.value) ?? []
+                    // Make the scan visible to search and smart-filter resolution without
+                    // fully loading the root into categories. Guard against a concurrent
+                    // loadRoot that may have populated the same key already.
+                    if !images.isEmpty {
+                        await MainActor.run { [weak self] in
+                            guard let self, !self.loadedRootURLs.contains(url) else { return }
+                            self.searchIndexByRoot[url] = images
+                        }
+                    }
                 }
 
                 guard !Task.isCancelled else { return }

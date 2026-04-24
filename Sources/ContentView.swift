@@ -39,6 +39,10 @@ struct ContentView: View {
     @State private var newSmartFilterQuery = ""
     @State private var smartFilterRenameID: UUID?
     @State private var smartFilterRenameDraft = ""
+    @State private var isFamilyTreeActive = false
+    @State private var familyTreeMatches: [ImageFamilyMatch] = []
+    @State private var isFamilyTreeLoading = false
+    @State private var familyTreeSourceImage: ImageItem?
 
     var body: some View {
         NavigationSplitView {
@@ -511,6 +515,7 @@ struct ContentView: View {
     ) -> some View {
         Button {
             if isSearching { clearSearch() }
+            if isFamilyTreeActive { isFamilyTreeActive = false }
             relinquishSearchFocus()
             clearDroppedInspection()
             library.selectCategory(category)
@@ -546,9 +551,16 @@ struct ContentView: View {
         .tag(category.id)
     }
 
+    private var familyTreeTaskID: String {
+        guard isFamilyTreeActive else { return "" }
+        return familyTreeSourceImage?.id ?? ""
+    }
+
     private var thumbnailGrid: some View {
         Group {
-            if isSearching {
+            if isFamilyTreeActive {
+                familyTreeView
+            } else if isSearching {
                 VStack(spacing: 0) {
                     gridControls(title: "Search Results", subtitle: searchResultsSummary, showSaveSearch: true)
                     if showFilterBar { filterBar }
@@ -587,6 +599,15 @@ struct ContentView: View {
             } else {
                 PlaceholderView(title: "Choose a Category", systemImage: "photo.on.rectangle")
             }
+        }
+        .task(id: familyTreeTaskID) {
+            guard isFamilyTreeActive, let image = displayedSelectedImage else {
+                familyTreeMatches = []
+                return
+            }
+            isFamilyTreeLoading = true
+            familyTreeMatches = await library.familyMatches(for: image)
+            isFamilyTreeLoading = false
         }
     }
 
@@ -845,6 +866,7 @@ struct ContentView: View {
                 Spacer(minLength: 12)
 
                 previewButton
+                familyTreeButton
                 filterBarToggleButton
                 sortButton
                 thumbnailSizeControl
@@ -859,6 +881,7 @@ struct ContentView: View {
 
                 HStack(spacing: 16) {
                     previewButton
+                    familyTreeButton
                     filterBarToggleButton
                     sortButton
                     Spacer(minLength: 8)
@@ -874,6 +897,7 @@ struct ContentView: View {
                 }
 
                 previewButton
+                familyTreeButton
                 filterBarToggleButton
                 sortButton
 
@@ -1145,6 +1169,139 @@ struct ContentView: View {
                 .foregroundStyle(.secondary)
         }
         .help("Adjust thumbnail size")
+    }
+
+    private var familyTreeButton: some View {
+        Button {
+            if !isFamilyTreeActive {
+                familyTreeSourceImage = displayedSelectedImage
+            }
+            isFamilyTreeActive.toggle()
+        } label: {
+            Label("Family Tree", systemImage: "point.3.connected.trianglepath.dotted")
+        }
+        .labelStyle(.iconOnly)
+        .help(isFamilyTreeActive ? "Exit Family Tree" : "Show Image Family Tree")
+        .disabled(displayedSelectedImage == nil && !isFamilyTreeActive)
+        .foregroundStyle(isFamilyTreeActive ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(Color.primary))
+    }
+
+    @ViewBuilder
+    private var familyTreeView: some View {
+        VStack(spacing: 0) {
+            familyTreeControls
+            if isFamilyTreeLoading {
+                ProgressView("Finding related images…")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if familyTreeMatches.isEmpty {
+                PlaceholderView(
+                    title: "No Related Images",
+                    systemImage: "point.3.connected.trianglepath.dotted",
+                    description: "No related images were found for this image."
+                )
+            } else {
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 24, pinnedViews: []) {
+                        ForEach(groupedFamilyMatches, id: \.0.displayName) { relationship, matches in
+                            VStack(alignment: .leading, spacing: 10) {
+                                Text(relationship.displayName)
+                                    .font(.headline)
+                                    .padding(.horizontal, 20)
+
+                                LazyVGrid(columns: gridColumns, spacing: 16) {
+                                    ForEach(matches) { match in
+                                        familyThumbnail(for: match)
+                                    }
+                                }
+                                .padding(.horizontal, 20)
+                            }
+                        }
+                    }
+                    .padding(.vertical, 20)
+                }
+            }
+        }
+    }
+
+    private var familyTreeControls: some View {
+        HStack(spacing: 12) {
+            Button {
+                isFamilyTreeActive = false
+            } label: {
+                Label("Back", systemImage: "chevron.left")
+            }
+            .labelStyle(.iconOnly)
+            .help("Return to Library")
+
+            if let image = familyTreeSourceImage {
+                Text("Family Tree: \(image.displayName)")
+                    .font(.headline)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            } else {
+                Text("Family Tree")
+                    .font(.headline)
+            }
+
+            Spacer()
+            thumbnailSizeControl
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background(controlStripBackground)
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(controlStripDivider)
+                .frame(height: 1)
+        }
+    }
+
+    private var groupedFamilyMatches: [(ImageRelationship, [ImageFamilyMatch])] {
+        let order: [ImageRelationship] = [.sibling, .variant, .upscale, .related]
+        return order.compactMap { rel in
+            let group = familyTreeMatches.filter { $0.relationship == rel }
+            return group.isEmpty ? nil : (rel, group)
+        }
+    }
+
+    private func familyThumbnail(for match: ImageFamilyMatch) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ThumbnailCell(
+                image: match.image,
+                isSelected: match.image.id == displayedSelectedImage?.id,
+                thumbnailHeight: thumbnailSize,
+                isFavorite: library.isFavorite(match.image),
+                suspendThumbnailLoading: false,
+                onSelect: { selectFamilyMatch(match.image) },
+                onOpenPreview: { openPreview(for: match.image) },
+                onToggleFavorite: { library.toggleFavorite(match.image) },
+                onTrash: { library.trashImage(match.image) }
+            )
+
+            if !match.reasons.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 4) {
+                        ForEach(match.reasons, id: \.rawValue) { reason in
+                            Text(reason.rawValue)
+                                .font(.caption2)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(Capsule().fill(Color.accentColor.opacity(0.12)))
+                                .foregroundStyle(Color.accentColor)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func selectFamilyMatch(_ image: ImageItem) {
+        let category = library.categories.first { $0.images.contains { $0.id == image.id } }
+        if let category {
+            library.selectCategory(category)
+            library.selectImage(image)
+        }
     }
 
     private func sortedImages(for category: Category) -> [ImageItem] {
