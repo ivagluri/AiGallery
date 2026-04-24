@@ -140,3 +140,21 @@ enum KinReason: String {
     case closeTimestamp    = "close timestamp"
     case upscaleDimensions = "larger dimensions"
 }
+
+// MARK: - Prompt Diff
+
+enum DiffToken {
+    case unchanged(String)
+    case added(String)
+    case removed(String)
+}
+
+struct MetadataDiff {
+    let promptTokens: [DiffToken]
+    let negativeTokens: [DiffToken]
+    let parameterDiffs: [(key: String, aValue: String?, bValue: String?)]
+
+    var hasAnyContent: Bool {
+        !promptTokens.isEmpty || !negativeTokens.isEmpty || !parameterDiffs.isEmpty
+    }
+}

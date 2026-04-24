@@ -8,11 +8,13 @@ A spatial view where images become stars clustered by shared prompt tags, models
 
 Distilled version: a 2D tag map where selecting a tag pulls related images into clusters. This could start with tag co-occurrence and avoid ML.
 
-## Image Family Trees
+## Image Family Trees ✓ Shipped as "Kin"
 
 AI images often come in batches, evolutions, seed variations, upscales, inpaints, and prompt tweaks. The app could detect nearby filenames, seeds, dimensions, and metadata similarity, then show images as likely lineages.
 
 Distilled version: for a selected image, show possible siblings based on same folder, similar prompt, same seed or model, and nearby dates.
+
+Implemented: Kin view in grid toolbar. Groups results as Same Batch, Variants, Possible Upscales, Related. Pivot navigation with history stack. Seed indexed in SQLite.
 
 ## Prompt Archaeology Mode
 
@@ -54,7 +56,9 @@ Distilled version: export selected images as a local contact sheet PNG with file
 
 Select two images and compare their generation metadata like source code: added tags, removed tags, changed sampler, seed, CFG, model, and dimensions.
 
-Distilled version: "Compare With Selected" in the inspector, showing prompt, negative prompt, and metadata diffs.
+Distilled version: a "Compare" chip in the inspector freezes the current image as A. The next image the user clicks in the grid becomes B and the diff shows immediately in the inspector — no separate mode UI, no toolbar button, no multi-select rewiring. Clicking anywhere outside the diff (or pressing Escape) clears it. Max two images; three-way diffs are ambiguous and visually crowded.
+
+Diff display: side-by-side prompt text with added words in green, removed words in red, unchanged words muted. Non-prompt fields (model, sampler, seed, CFG, steps, dimensions) shown as a two-column table with changed values highlighted.
 
 ## Dream Deck Mode
 
@@ -76,10 +80,10 @@ Distilled version: a "Curiosities" smart collection powered by local rules.
 
 ## Strongest Prototype Candidates
 
-- Image Family Trees
+- ~~Image Family Trees~~ (shipped as Kin)
 - Prompt Diff Viewer
 - Prompt Constellation Map
 - Timeline Of Obsessions
 - Contact Sheet Storyboards
 
-Image Family Trees and Prompt Diff Viewer are likely the strongest first prototypes because they fit AiGallery's identity, reuse metadata already parsed by the app, and make the app feel purpose-built for AI image archaeology.
+Prompt Diff Viewer is the likely next strongest prototype because it fits AiGallery's identity, reuses metadata already parsed by the app, and makes the app feel purpose-built for AI image archaeology.
