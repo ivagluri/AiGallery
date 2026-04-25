@@ -3,6 +3,7 @@
 ### 25/4/26 Midstream updates--
 - Adjusted click area and added button padding to infobar control strip, much more reliable and forgiving to click
 - **Multi-select** — Cmd+click to toggle individual images, Shift+click or Shift+arrow to extend a range, Cmd+A to select all. Group delete (Backspace or right-click) shows a confirmation sheet with a "don't ask again" option. The inspector always shows the last-clicked image; its delete button still acts on that single image only.
+- **Sort works in search** — the sort button now applies to search results, so you can sort a search by name or creation date the same way you would a browsed folder.
 
 ## v2.1.1
 
