@@ -12,6 +12,10 @@
 - **ComfyUI metadata display cleanup** — long raw metadata fields are now collapsible in the inspector, keeping JSON-heavy images readable.
 - **Fixed intermittent dead input on launch** — the initial library scan now runs off the main thread, preventing cold-start activation from getting stuck while the app loads.
 
+### Midstream update - 2026-04-25
+
+- **Prompt diff preview polish** — diff mode now keeps image A pinned, slides image B over it in the inspector, restores image A when compare ends, and scrolls the grid back to the active selection.
+
 ### Midstream update - 2026-04-24
 
 - **Expanded image sorting** — sort the grid by name or file creation date, with compact toolbar cycling and matching Sort menu controls.

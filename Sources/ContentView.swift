@@ -517,7 +517,7 @@ struct ContentView: View {
         Button {
             if isSearching { clearSearch() }
             if isKinActive { isKinActive = false; kinHistory = [] }
-            if diffAnchorImage != nil { diffAnchorImage = nil }
+            if diffAnchorImage != nil { endDiffMode(restoreAnchorSelection: false) }
             relinquishSearchFocus()
             clearDroppedInspection()
             library.selectCategory(category)
@@ -642,32 +642,11 @@ struct ContentView: View {
 
                     imageActionStrip(for: image)
 
-                    LargePreview(imageURL: image.fileURL)
-                        .frame(maxWidth: .infinity)
-                        .shadow(
-                            color: (diffAnchorImage?.id != image.id) ? Color.black.opacity(0.22) : Color.clear,
-                            radius: 10, x: -3, y: 4
-                        )
-                        .overlay(alignment: .topTrailing) {
-                            if !isInspectingDroppedImage {
-                                previewFavoriteButton(for: image)
-                                    .padding(12)
-                            }
-                        }
-                        .background(alignment: .topLeading) {
-                            if let anchor = diffAnchorImage, anchor.id != image.id {
-                                LargePreview(imageURL: anchor.fileURL)
-                                    .rotationEffect(.degrees(4), anchor: .bottomLeading)
-                                    .offset(x: 22, y: 14)
-                                    .opacity(0.72)
-                                    .allowsHitTesting(false)
-                            }
-                        }
-                        .padding(.bottom, (diffAnchorImage?.id != image.id) ? 16 : 0)
-                        .padding(.trailing, (diffAnchorImage?.id != image.id) ? 24 : 0)
+                    inspectorPreview(for: image)
 
                     if let anchor = diffAnchorImage, anchor.id != image.id {
                         diffBanner(anchor: anchor, current: image, currentMetadata: metadata)
+                            .transition(.move(edge: .top).combined(with: .opacity))
                     }
 
                     if hasInfoContent {
@@ -700,6 +679,7 @@ struct ContentView: View {
                     }
                 }
                 .padding(20)
+                .animation(.easeOut(duration: 0.22), value: diffComparisonAnimationID(for: image))
             } else {
                 PlaceholderView(title: "Choose an Image", systemImage: "sidebar.right")
             }
@@ -718,8 +698,93 @@ struct ContentView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
+    private func diffComparisonAnimationID(for image: ImageItem) -> String {
+        guard let anchor = diffAnchorImage else {
+            return "none"
+        }
+
+        return "\(anchor.id)->\(image.id)"
+    }
+
+    private func endDiffMode(restoreAnchorSelection: Bool) {
+        let anchor = diffAnchorImage
+        diffAnchorImage = nil
+
+        guard restoreAnchorSelection, let anchor else {
+            return
+        }
+
+        if isSearching {
+            searchSelectedImageID = anchor.id
+        } else {
+            if library.selectedCategory?.images.contains(where: { $0.id == anchor.id }) != true,
+               let anchorCategory = library.categories.first(where: { $0.images.contains { $0.id == anchor.id } }) {
+                library.selectCategory(anchorCategory)
+            }
+            library.selectImage(anchor)
+        }
+
+        pendingScrollRequest = GridScrollRequest(targetID: anchor.id, anchor: .center, animated: true)
+    }
+
+    @ViewBuilder
+    private func inspectorPreview(for image: ImageItem) -> some View {
+        if let anchor = diffAnchorImage, anchor.id != image.id {
+            comparisonPreview(anchor: anchor, current: image)
+        } else {
+            standaloneInspectorPreview(for: image)
+        }
+    }
+
+    private func standaloneInspectorPreview(for image: ImageItem) -> some View {
+        LargePreview(imageURL: image.fileURL)
+            .frame(maxWidth: .infinity)
+            .overlay(alignment: .topTrailing) {
+                if !isInspectingDroppedImage {
+                    previewFavoriteButton(for: image)
+                        .padding(12)
+                }
+            }
+    }
+
+    private func comparisonPreview(anchor: ImageItem, current: ImageItem) -> some View {
+        ZStack(alignment: .topLeading) {
+            LargePreview(imageURL: anchor.fileURL)
+                .frame(maxWidth: .infinity)
+                .offset(x: 18, y: 14)
+                .opacity(0.72)
+                .shadow(color: Color.black.opacity(0.16), radius: 8, x: 2, y: 3)
+                .allowsHitTesting(false)
+
+            LargePreview(imageURL: current.fileURL)
+                .frame(maxWidth: .infinity)
+                .overlay {
+                    RoundedRectangle(cornerRadius: 14)
+                        .stroke(Color.accentColor.opacity(0.55), lineWidth: 1)
+                }
+                .shadow(color: Color.black.opacity(0.24), radius: 12, x: -4, y: 5)
+                .overlay(alignment: .topTrailing) {
+                    if !isInspectingDroppedImage {
+                        previewFavoriteButton(for: current)
+                            .padding(12)
+                    }
+                }
+                .transition(
+                    .asymmetric(
+                        insertion: .move(edge: .leading).combined(with: .opacity),
+                        removal: .opacity
+                    )
+                )
+                .id("diff-front-\(current.id)")
+        }
+        .padding(.bottom, 16)
+        .padding(.trailing, 22)
+    }
+
     private func imageActionStrip(for image: ImageItem) -> some View {
-        HStack(spacing: 16) {
+        let isCompareModeActive = diffAnchorImage != nil
+
+        return HStack(spacing: 16) {
             Button { revealInFinder(image.fileURL) } label: {
                 Image(systemName: "folder")
                     .font(.caption.weight(.semibold))
@@ -739,17 +804,21 @@ struct ContentView: View {
             .help("Copy Path")
 
             Button {
-                withAnimation(.none) {
-                    diffAnchorImage = (diffAnchorImage?.id == image.id) ? nil : image
+                withAnimation(.easeOut(duration: 0.18)) {
+                    if isCompareModeActive {
+                        endDiffMode(restoreAnchorSelection: true)
+                    } else {
+                        diffAnchorImage = image
+                    }
                 }
             } label: {
                 Image(systemName: "square.split.2x1")
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(diffAnchorImage?.id == image.id ? Color.accentColor : Color.secondary)
+                    .foregroundStyle(isCompareModeActive ? Color.accentColor : Color.secondary)
                     .frame(width: 24, height: 24)
             }
             .buttonStyle(.plain)
-            .help(diffAnchorImage?.id == image.id ? "Stop Comparing" : "Compare with Another Image")
+            .help(isCompareModeActive ? "Stop Comparing" : "Compare with Another Image")
 
             Button { library.trashImage(image) } label: {
                 Image(systemName: "trash")
@@ -822,7 +891,11 @@ struct ContentView: View {
                     .foregroundStyle(.primary)
                     .lineLimit(1)
                 Spacer()
-                Button { diffAnchorImage = nil } label: {
+                Button {
+                    withAnimation(.easeOut(duration: 0.18)) {
+                        endDiffMode(restoreAnchorSelection: true)
+                    }
+                } label: {
                     Image(systemName: "xmark")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(Color.secondary)
@@ -1814,7 +1887,9 @@ private func isCollapsedActiveNode(_ node: SidebarNode) -> Bool {
 
         // keyCode 53 = Escape — clear diff anchor without consuming the event
         if event.keyCode == 53, diffAnchorImage != nil {
-            diffAnchorImage = nil
+            withAnimation(.easeOut(duration: 0.18)) {
+                endDiffMode(restoreAnchorSelection: true)
+            }
         }
 
         if let previewEventResult = handlePreviewHotkey(event) {
