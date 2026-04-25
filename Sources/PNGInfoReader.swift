@@ -775,16 +775,16 @@ enum PNGInfoReader {
     private static func resolveTextFromNode(_ node: [String: Any], nodeID: String?, nodes: [String: [String: Any]], depth: Int) -> String? {
         guard depth < 8 else { return nil }
 
+        if let nodeID, let previewText = previewText(forSourceNodeID: nodeID, in: nodes) {
+            return previewText
+        }
+
         if let text = stringInput(named: "text", in: node), !text.isEmpty {
             return text
         }
 
         if let resolvedText = resolveStringPart(forInput: "text", in: node, nodes: nodes, depth: depth) {
             return resolvedText
-        }
-
-        if let nodeID, let previewText = previewText(forSourceNodeID: nodeID, in: nodes) {
-            return previewText
         }
 
         switch classType(of: node) {
