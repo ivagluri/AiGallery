@@ -585,16 +585,26 @@ final class LibraryStore: ObservableObject {
         GeneralLibraryProfile().search(matching: query, in: searchIndex, limit: limit)
     }
 
-    func searchWithMetadata(matching query: String, limit: Int) async -> SearchResult {
-        let filenameResult = searchTags(matching: query, limit: limit)
-        guard !metadataIndexes.isEmpty else { return filenameResult }
+    func searchWithMetadata(matching query: String, limit: Int, limitToRoot: URL? = nil) async -> SearchResult {
+        let effectiveSearchIndex: [ImageItem]
+        let effectiveMetaIndexes: [URL: MetadataIndex]
+        if let root = limitToRoot {
+            effectiveSearchIndex = searchIndexByRoot[root] ?? []
+            effectiveMetaIndexes = metadataIndexes[root].map { [root: $0] } ?? [:]
+        } else {
+            effectiveSearchIndex = searchIndex
+            effectiveMetaIndexes = metadataIndexes
+        }
+
+        let filenameResult = GeneralLibraryProfile().search(matching: query, in: effectiveSearchIndex, limit: limit)
+        guard !effectiveMetaIndexes.isEmpty else { return filenameResult }
 
         let parsedQuery = parseSearchQuery(query)
         guard !parsedQuery.isEmpty else { return filenameResult }
 
         var metadataExcludedPaths = Set<String>()
         for term in parsedQuery.excludedTerms {
-            metadataExcludedPaths.formUnion(await metadataPaths(containing: term))
+            metadataExcludedPaths.formUnion(await metadataPaths(containing: term, in: effectiveMetaIndexes))
         }
 
         let filenameImages = metadataExcludedPaths.isEmpty
@@ -602,17 +612,17 @@ final class LibraryStore: ObservableObject {
             : filenameResult.images.filter { !metadataExcludedPaths.contains($0.id) }
         let filenamePathSet = Set(filenameImages.map(\.id))
 
-        // AND across required terms, union across all root indexes.
+        // AND across required terms, union across effective indexes.
         var matchingMetadataPaths: Set<String>? = nil
         if parsedQuery.requiredTerms.isEmpty, !parsedQuery.excludedTerms.isEmpty {
             var allPaths = Set<String>()
-            for index in metadataIndexes.values {
+            for index in effectiveMetaIndexes.values {
                 allPaths.formUnion(await index.allImagePaths())
             }
             matchingMetadataPaths = allPaths
         } else {
             for term in parsedQuery.requiredTerms {
-                let termPaths = await metadataPaths(containing: term)
+                let termPaths = await metadataPaths(containing: term, in: effectiveMetaIndexes)
                 if var accumulated = matchingMetadataPaths {
                     accumulated.formIntersection(termPaths)
                     matchingMetadataPaths = accumulated
@@ -623,7 +633,7 @@ final class LibraryStore: ObservableObject {
         }
 
         let duplicatePathSet = parsedQuery.requiredTerms.isEmpty
-            ? Set(searchIndex.map(\.id))
+            ? Set(effectiveSearchIndex.map(\.id))
             : filenamePathSet
         let newMetadataPaths = (matchingMetadataPaths ?? [])
             .subtracting(duplicatePathSet)
@@ -648,9 +658,9 @@ final class LibraryStore: ObservableObject {
         )
     }
 
-    private func metadataPaths(containing term: String) async -> Set<String> {
+    private func metadataPaths(containing term: String, in indexes: [URL: MetadataIndex]) async -> Set<String> {
         var termPaths = Set<String>()
-        for index in metadataIndexes.values {
+        for index in indexes.values {
             for field in MetadataField.allCases {
                 termPaths.formUnion(await index.imagePaths(where: field, contains: term))
             }

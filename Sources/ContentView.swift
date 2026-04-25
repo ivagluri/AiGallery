@@ -47,6 +47,7 @@ struct ContentView: View {
     @State private var diffAnchorImage: ImageItem?
     @State private var multiSelectedImageIDs: Set<ImageItem.ID> = []
     @AppStorage("suppressMultiDeleteConfirm") private var suppressMultiDeleteConfirm = false
+    @State private var searchScopeCurrentRootOnly = false
 
     var body: some View {
         NavigationSplitView {
@@ -103,11 +104,13 @@ struct ContentView: View {
             // Re-run active search so results from a removed root are evicted.
             let query = trimmedActiveSearchText
             if !query.isEmpty {
+                let scopeRoot = searchScopeCurrentRootOnly ? activeScopeRootURL : nil
                 pendingSearchTask?.cancel()
                 pendingSearchTask = Task { @MainActor in
                     activeSearchResults = await library.searchWithMetadata(
                         matching: query,
-                        limit: Self.maximumSearchResults
+                        limit: Self.maximumSearchResults,
+                        limitToRoot: scopeRoot
                     )
                 }
             }
@@ -174,6 +177,10 @@ struct ContentView: View {
         .foregroundStyle(hasActive ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(Color.primary))
     }
 
+    private var activeScopeRootURL: URL? {
+        library.categories.first(where: { $0.id == library.selectedCategoryID })?.sourceRootURL
+    }
+
     private var toolbarSearchField: some View {
         HStack(spacing: 8) {
             Image(systemName: "magnifyingglass")
@@ -195,6 +202,22 @@ struct ContentView: View {
                 }
                 .buttonStyle(.plain)
                 .help("Clear Search")
+            }
+
+            if library.rootURLs.count > 1 {
+                Button {
+                    searchScopeCurrentRootOnly.toggle()
+                    if !searchText.isEmpty { handleSearchTextChange(searchText) }
+                } label: {
+                    Image(systemName: searchScopeCurrentRootOnly ? "folder.fill" : "folder")
+                        .foregroundStyle(searchScopeCurrentRootOnly ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(Color.secondary))
+                }
+                .buttonStyle(.plain)
+                .keyboardShortcut("l", modifiers: [.command, .option])
+                .help(searchScopeCurrentRootOnly
+                    ? "Searching current folder only — click or ⌘⌥L to search all folders"
+                    : "Searching all folders — click or ⌘⌥L to limit to current folder")
+                .disabled(!searchScopeCurrentRootOnly && activeScopeRootURL == nil)
             }
         }
         .padding(.horizontal, 10)
@@ -1762,12 +1785,18 @@ private func isCollapsedActiveNode(_ node: SidebarNode) -> Bool {
         let resultCount = activeSearchResults.totalMatches
         let visibleCount = activeSearchResults.images.count
         let matchLabel = resultCount == 1 ? "match" : "matches"
-
-        if resultCount > visibleCount {
-            return "Showing first \(visibleCount) of \(resultCount) \(matchLabel) for \"\(trimmedActiveSearchText)\""
+        let scopeSuffix: String
+        if searchScopeCurrentRootOnly, let root = activeScopeRootURL {
+            scopeSuffix = " in \(root.lastPathComponent)"
+        } else {
+            scopeSuffix = ""
         }
 
-        return "\(resultCount) \(matchLabel) for \"\(trimmedActiveSearchText)\""
+        if resultCount > visibleCount {
+            return "Showing first \(visibleCount) of \(resultCount) \(matchLabel) for \"\(trimmedActiveSearchText)\"\(scopeSuffix)"
+        }
+
+        return "\(resultCount) \(matchLabel) for \"\(trimmedActiveSearchText)\"\(scopeSuffix)"
     }
 
     private var searchPlaceholderDescription: String {
@@ -1817,13 +1846,15 @@ private func isCollapsedActiveNode(_ node: SidebarNode) -> Bool {
             return
         }
 
+        let scopeRoot = searchScopeCurrentRootOnly ? activeScopeRootURL : nil
         pendingSearchTask = Task { @MainActor in
             try? await Task.sleep(for: .milliseconds(180))
             guard !Task.isCancelled else { return }
             activeSearchText = trimmedValue
             activeSearchResults = await library.searchWithMetadata(
                 matching: trimmedValue,
-                limit: Self.maximumSearchResults
+                limit: Self.maximumSearchResults,
+                limitToRoot: scopeRoot
             )
             guard !Task.isCancelled else { return }
             if let searchSelectedImageID, activeSearchResults.images.contains(where: { $0.id == searchSelectedImageID }) {
