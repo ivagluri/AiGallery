@@ -2,7 +2,11 @@
 
 ## Midstream changes
 
-### 2026-04-23 · 846b139..HEAD
+### 2026-04-24 · d3eedaa..HEAD
+
+- **Fixed intermittent dead input on launch** — on cold starts (empty filesystem cache, first run after clearing prefs), the initial library scan was running synchronously on the main thread, blocking it long enough for the OS window activation event to be dropped. Mouse clicks and keyboard input would then be silently ignored until a minimize/maximize cycle forced re-activation. The fix moves the initial folder scan off the main thread; the library now loads asynchronously with a brief spinner before content appears.
+
+### 2026-04-23 · 846b139..d3eedaa
 
 - **Kin view** — select any image and open the Kin view from the grid toolbar to see related images grouped as Same Batch, Variants, Possible Upscales, and Related. Hover a thumbnail to see the reason chips that explain why it appeared. Clicking a thumbnail updates the inspector without leaving Kin view; the Back button returns to the library. Navigating via the sidebar dismisses Kin view.
 - **Kin pivot / history** — while in Kin view, clicking the Kin icon in the control strip pivots to show kin of the currently inspected image; the Back button steps through pivot history before returning to the library.
