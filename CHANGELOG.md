@@ -2,10 +2,6 @@
 
 ## v2.1
 
-### Midstream update - 2026-04-24
-
-- **Expanded image sorting** — sort the grid by name or file creation date, with compact toolbar cycling and matching Sort menu controls.
-
 - **Kin view** — select any image and open Kin view to see related images grouped as Same Batch, Variants, Possible Upscales, and Related, with reason chips explaining each match.
 - **Kin pivot / history** — pivot from the inspected image to explore kin-of-kin, then step back through pivot history or return to the library.
 - **Prompt Diff Viewer** — pin one image as A, select another as B, and compare prompt tags and generation parameters directly in the inspector.
@@ -15,6 +11,10 @@
 - **Seed-aware metadata index** — generation seed is indexed alongside model, prompt, sampler, and other fields to improve same-seed variant detection.
 - **ComfyUI metadata display cleanup** — long raw metadata fields are now collapsible in the inspector, keeping JSON-heavy images readable.
 - **Fixed intermittent dead input on launch** — the initial library scan now runs off the main thread, preventing cold-start activation from getting stuck while the app loads.
+
+### Midstream update - 2026-04-24
+
+- **Expanded image sorting** — sort the grid by name or file creation date, with compact toolbar cycling and matching Sort menu controls.
 
 ## v2.0
 
