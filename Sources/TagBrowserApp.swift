@@ -26,6 +26,12 @@ struct AiGalleryApp: App {
             ContentView()
                 .environmentObject(library)
                 .frame(minWidth: 900, minHeight: 640)
+                .onAppear {
+                    DispatchQueue.main.async {
+                        NSApp.activate(ignoringOtherApps: true)
+                        NSApp.windows.first { $0.canBecomeKey }?.makeKeyAndOrderFront(nil)
+                    }
+                }
         }
         .defaultSize(width: 1500, height: 920)
         .windowStyle(.titleBar)

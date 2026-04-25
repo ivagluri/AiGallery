@@ -89,20 +89,11 @@ final class LibraryStore: ObservableObject {
         ) ?? persistedURLs.first
 
         if let url = activeURL {
-            let profile = GeneralLibraryProfile()
-            if let (loaded, index) = try? Self.buildLibrary(rootURL: url, profile: profile) {
-                sourceCategoriesByRoot[url] = loaded
-                searchIndexByRoot[url] = index
-                loadedRootURLs = [url]
-                pruneFavoritesToExistingImages()
-                rebuildCategories()
-                selectedCategoryID = Self.validCategoryID(current: selectedCategoryID, categories: categories)
-                selectedImageID = Self.validImageID(
-                    current: selectedImageID,
-                    categories: categories,
-                    selectedCategoryID: selectedCategoryID
-                )
-                startBackgroundIndexing(for: url)
+            // Load off the main thread so the window activation event isn't dropped
+            // while the filesystem scan runs.
+            isLoading = true
+            Task { [weak self] in
+                await self?.performInitialLoad(activeURL: url, allURLs: persistedURLs)
             }
         } else {
             categories = []
@@ -110,9 +101,40 @@ final class LibraryStore: ObservableObject {
             selectedImageID = nil
         }
 
-        // Background-index all non-loaded roots for cross-root search coverage.
-        for url in persistedURLs where !loadedRootURLs.contains(url) {
+        // Background-index non-active roots immediately; active root is indexed
+        // after performInitialLoad populates its searchIndex.
+        for url in persistedURLs where url != activeURL {
             startBackgroundIndexing(for: url)
+        }
+    }
+
+    private func performInitialLoad(activeURL: URL, allURLs: [URL]) async {
+        let profile = GeneralLibraryProfile()
+        do {
+            let (loaded, index) = try await Task.detached(priority: .userInitiated) {
+                try Self.buildLibrary(rootURL: activeURL, profile: profile)
+            }.value
+            await MainActor.run { [weak self] in
+                guard let self else { return }
+                self.sourceCategoriesByRoot[activeURL] = loaded
+                self.searchIndexByRoot[activeURL] = index
+                self.loadedRootURLs = [activeURL]
+                self.pruneFavoritesToExistingImages()
+                self.rebuildCategories()
+                self.selectedCategoryID = Self.validCategoryID(current: self.selectedCategoryID, categories: self.categories)
+                self.selectedImageID = Self.validImageID(
+                    current: self.selectedImageID,
+                    categories: self.categories,
+                    selectedCategoryID: self.selectedCategoryID
+                )
+                self.isLoading = false
+                self.startBackgroundIndexing(for: activeURL)
+            }
+        } catch {
+            await MainActor.run { [weak self] in
+                self?.isLoading = false
+                self?.errorMessage = error.localizedDescription
+            }
         }
     }
 
