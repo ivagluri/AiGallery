@@ -6,6 +6,9 @@
 - **Prompt diff preview polish** — diff mode now keeps image A pinned, slides image B over it in the inspector, restores image A when compare ends, and scrolls the grid back to the active selection.
 - **Expanded image sorting** — sort the grid by name or file creation date, with compact toolbar cycling and matching Sort menu controls.
 
+### 25/4/26 Midstream updates--
+- Adjusted click area and added button padding to infobar control strip, much more reliable and forgiving to click
+
 ## v2.1
 
 - **Kin view** — select any image and open Kin view to see related images grouped as Same Batch, Variants, Possible Upscales, and Related, with reason chips explaining each match.

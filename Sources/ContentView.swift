@@ -784,23 +784,23 @@ struct ContentView: View {
     private func imageActionStrip(for image: ImageItem) -> some View {
         let isCompareModeActive = diffAnchorImage != nil
 
-        return HStack(spacing: 16) {
+        return HStack(spacing: 6) {
             Button { revealInFinder(image.fileURL) } label: {
                 Image(systemName: "folder")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(Color.secondary)
-                    .frame(width: 24, height: 24)
+                    .frame(width: 22, height: 22)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(InspectorActionButtonStyle())
             .help("Reveal in Finder")
 
             Button { copyInspectorValue(image.fileURL.path) } label: {
                 Image(systemName: copiedInspectorValue == image.fileURL.path ? "checkmark" : "doc.on.doc")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(copiedInspectorValue == image.fileURL.path ? Color.accentColor : Color.secondary)
-                    .frame(width: 24, height: 24)
+                    .frame(width: 22, height: 22)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(InspectorActionButtonStyle())
             .help("Copy Path")
 
             Button {
@@ -815,32 +815,22 @@ struct ContentView: View {
                 Image(systemName: "square.split.2x1")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(isCompareModeActive ? Color.accentColor : Color.secondary)
-                    .frame(width: 24, height: 24)
+                    .frame(width: 22, height: 22)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(InspectorActionButtonStyle())
             .help(isCompareModeActive ? "Stop Comparing" : "Compare with Another Image")
 
             Button { library.trashImage(image) } label: {
                 Image(systemName: "trash")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(Color.red.opacity(0.7))
-                    .frame(width: 24, height: 24)
+                    .frame(width: 22, height: 22)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(InspectorActionButtonStyle())
             .help("Move to Trash")
         }
         .frame(maxWidth: .infinity)
-        .frame(height: 38)
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
-        .background(
-            RoundedRectangle(cornerRadius: 12)
-                .fill(Color(nsColor: .windowBackgroundColor))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 12)
-                .stroke(Color.primary.opacity(0.08), lineWidth: 1)
-        )
+        .padding(.horizontal, 2)
     }
 
     private func promptsCard(prompt: String?, negativePrompt: String?, promptStatusMessage: String?) -> some View {
@@ -2698,6 +2688,25 @@ private struct InspectorSplitView<Primary: View, Inspector: View>: NSViewControl
             pendingResizeStateResetTask = resetTask
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.24, execute: resetTask)
         }
+    }
+}
+
+private struct InspectorActionButtonStyle: ButtonStyle {
+    @State private var isHovered = false
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .padding(6)
+            .background(
+                RoundedRectangle(cornerRadius: 7)
+                    .fill(Color.primary.opacity(
+                        configuration.isPressed ? 0.12 : (isHovered ? 0.08 : 0.04)
+                    ))
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 7))
+            .scaleEffect(configuration.isPressed ? 0.92 : 1.0)
+            .animation(.easeOut(duration: 0.1), value: configuration.isPressed)
+            .onHover { isHovered = $0 }
     }
 }
 
