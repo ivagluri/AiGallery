@@ -1485,6 +1485,23 @@ struct ContentView: View {
         displayImageCache.images(for: category, order: imageSortOrder)
     }
 
+    private func sortedImages(_ items: [ImageItem]) -> [ImageItem] {
+        items.sorted { lhs, rhs in
+            switch imageSortOrder {
+            case .alphabeticalAscending:
+                return DisplayImageCache.isNameBefore(lhs, rhs, ascending: true)
+            case .alphabeticalDescending:
+                return DisplayImageCache.isNameBefore(lhs, rhs, ascending: false)
+            case .createdNewestFirst:
+                return DisplayImageCache.isDateBefore(lhs.createdAt, rhs.createdAt, ascending: false)
+                    ?? DisplayImageCache.isNameBefore(lhs, rhs, ascending: true)
+            case .createdOldestFirst:
+                return DisplayImageCache.isDateBefore(lhs.createdAt, rhs.createdAt, ascending: true)
+                    ?? DisplayImageCache.isNameBefore(lhs, rhs, ascending: true)
+            }
+        }
+    }
+
     private func humanReadablePNGLabel(for keyword: String) -> String {
         keyword
             .replacingOccurrences(of: "_", with: " ")
@@ -1714,7 +1731,7 @@ private func isCollapsedActiveNode(_ node: SidebarNode) -> Bool {
 
     private var displayImages: [ImageItem] {
         if isSearching {
-            return activeSearchResults.images
+            return sortedImages(activeSearchResults.images)
         }
 
         guard let category = library.selectedCategory else {
@@ -2565,7 +2582,7 @@ private final class DisplayImageCache: ObservableObject {
         return cachedImages
     }
 
-    private static func isNameBefore(_ lhs: ImageItem, _ rhs: ImageItem, ascending: Bool) -> Bool {
+    static func isNameBefore(_ lhs: ImageItem, _ rhs: ImageItem, ascending: Bool) -> Bool {
         let comparison = lhs.displayLabel.localizedCaseInsensitiveCompare(rhs.displayLabel)
         if comparison == .orderedSame {
             let fallback = lhs.displayName.localizedCaseInsensitiveCompare(rhs.displayName)
@@ -2574,7 +2591,7 @@ private final class DisplayImageCache: ObservableObject {
         return ascending ? comparison == .orderedAscending : comparison == .orderedDescending
     }
 
-    private static func isDateBefore(_ lhs: Date?, _ rhs: Date?, ascending: Bool) -> Bool? {
+    static func isDateBefore(_ lhs: Date?, _ rhs: Date?, ascending: Bool) -> Bool? {
         switch (lhs, rhs) {
         case let (lhs?, rhs?):
             guard lhs != rhs else { return nil }
