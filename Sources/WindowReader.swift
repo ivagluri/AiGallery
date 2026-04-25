@@ -56,7 +56,6 @@ struct KeyAwareView: NSViewRepresentable {
         context.coordinator.handler = handler
         context.coordinator.isActive = isActive
         nsView.coordinator = context.coordinator
-        nsView.activateIfNeeded()
     }
 
     final class Coordinator {
@@ -72,58 +71,42 @@ struct KeyAwareView: NSViewRepresentable {
 
 final class KeyHandlingView: NSView {
     var coordinator: KeyAwareView.Coordinator?
+    private var eventMonitorToken: Any?
 
-    override var acceptsFirstResponder: Bool {
-        true
-    }
+    override var acceptsFirstResponder: Bool { true }
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
-        activateIfNeeded()
+        if window != nil { installMonitor() } else { removeMonitor() }
     }
 
-    func activateIfNeeded() {
-        guard
-            let coordinator,
-            coordinator.isActive,
-            window?.firstResponder !== self,
-            !(window?.firstResponder is NSTextView)
-        else {
-            return
-        }
-
-        DispatchQueue.main.async { [weak self] in
-            guard
-                let self,
-                let coordinator = self.coordinator,
-                coordinator.isActive,
-                self.window?.attachedSheet == nil,
-                NSApp.modalWindow == nil
-            else {
-                return
-            }
-            // Only claim first responder when no interactive control has it.
-            // If a button or text field currently holds focus, leave it alone.
-            let fr = self.window?.firstResponder
-            guard fr == nil || fr is NSWindow else { return }
-
-            self.window?.makeFirstResponder(self)
+    private func installMonitor() {
+        guard eventMonitorToken == nil else { return }
+        eventMonitorToken = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp]) { [weak self] event in
+            guard let self,
+                  let coordinator = self.coordinator,
+                  coordinator.isActive else { return event }
+            return coordinator.handler(event) ? nil : event
         }
     }
 
+    private func removeMonitor() {
+        if let token = eventMonitorToken {
+            NSEvent.removeMonitor(token)
+            eventMonitorToken = nil
+        }
+    }
+
+    deinit { removeMonitor() }
+
+    // Secondary path if the view ever becomes first responder via the normal chain.
     override func keyDown(with event: NSEvent) {
-        if coordinator?.handler(event) == true {
-            return
-        }
-
+        if coordinator?.handler(event) == true { return }
         super.keyDown(with: event)
     }
 
     override func keyUp(with event: NSEvent) {
-        if coordinator?.handler(event) == true {
-            return
-        }
-
+        if coordinator?.handler(event) == true { return }
         super.keyUp(with: event)
     }
 }
