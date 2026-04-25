@@ -1,14 +1,14 @@
 # Changelog
 
+### 25/4/26 Midstream updates--
+- Adjusted click area and added button padding to infobar control strip, much more reliable and forgiving to click
+- **Multi-select** — Cmd+click to toggle individual images, Shift+click or Shift+arrow to extend a range, Cmd+A to select all. Group delete (Backspace or right-click) shows a confirmation sheet with a "don't ask again" option. The inspector always shows the last-clicked image; its delete button still acts on that single image only.
+
 ## v2.1.1
 
 - **Critical fix: keyboard input dead on launch** — replaced the first-responder claiming mechanism with an AppKit event monitor that intercepts key events before the responder chain. Eliminates a race condition where saved sidebar selection state could permanently block gallery keyboard input until a search was opened and closed.
 - **Prompt diff preview polish** — diff mode now keeps image A pinned, slides image B over it in the inspector, restores image A when compare ends, and scrolls the grid back to the active selection.
 - **Expanded image sorting** — sort the grid by name or file creation date, with compact toolbar cycling and matching Sort menu controls.
-
-### 25/4/26 Midstream updates--
-- Adjusted click area and added button padding to infobar control strip, much more reliable and forgiving to click
-- **Multi-select** — Cmd+click to toggle individual images, Shift+click or Shift+arrow to extend a range, Cmd+A to select all. Group delete (Backspace or right-click) shows a confirmation sheet with a "don't ask again" option. The inspector always shows the last-clicked image; its delete button still acts on that single image only.
 
 ## v2.1
 
