@@ -399,6 +399,35 @@ final class LibraryStore: ObservableObject {
         )
     }
 
+    func trashImages(_ images: [ImageItem]) {
+        guard !images.isEmpty else { return }
+        let ids = Set(images.map(\.id))
+        for image in images {
+            try? FileManager.default.trashItem(at: image.fileURL, resultingItemURL: nil)
+        }
+        for (rootURL, cats) in sourceCategoriesByRoot {
+            sourceCategoriesByRoot[rootURL] = cats.map { cat in
+                Category(
+                    id: cat.id, name: cat.name, shortName: cat.shortName,
+                    pathParts: cat.pathParts, rootGroupID: cat.rootGroupID, rootGroupName: cat.rootGroupName,
+                    folderURL: cat.folderURL, images: cat.images.filter { !ids.contains($0.id) },
+                    isSynthetic: cat.isSynthetic, sourceRootURL: cat.sourceRootURL
+                )
+            }
+        }
+        for (rootURL, idx) in searchIndexByRoot {
+            searchIndexByRoot[rootURL] = idx.filter { !ids.contains($0.id) }
+        }
+        favoriteImageIDs.subtract(ids)
+        persistFavoriteImageIDs()
+        rebuildCategories()
+        selectedCategoryID = Self.validCategoryID(current: selectedCategoryID, categories: categories)
+        persistSelectedCategoryID(selectedCategoryID)
+        selectedImageID = Self.validImageID(
+            current: selectedImageID, categories: categories, selectedCategoryID: selectedCategoryID
+        )
+    }
+
     // MARK: - Metadata filters
 
     func setMetadataFilter(_ filter: MetadataFilter) {

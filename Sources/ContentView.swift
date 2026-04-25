@@ -45,6 +45,8 @@ struct ContentView: View {
     @State private var kinSourceImage: ImageItem?
     @State private var kinHistory: [ImageItem] = []
     @State private var diffAnchorImage: ImageItem?
+    @State private var multiSelectedImageIDs: Set<ImageItem.ID> = []
+    @AppStorage("suppressMultiDeleteConfirm") private var suppressMultiDeleteConfirm = false
 
     var body: some View {
         NavigationSplitView {
@@ -518,6 +520,7 @@ struct ContentView: View {
             if isSearching { clearSearch() }
             if isKinActive { isKinActive = false; kinHistory = [] }
             if diffAnchorImage != nil { endDiffMode(restoreAnchorSelection: false) }
+            clearMultiSelection()
             relinquishSearchFocus()
             clearDroppedInspection()
             library.selectCategory(category)
@@ -1204,11 +1207,12 @@ struct ContentView: View {
                             ThumbnailCell(
                                 image: image,
                                 isSelected: image.id == selectedImageID,
+                                isMultiSelected: multiSelectedImageIDs.contains(image.id),
                                 thumbnailHeight: thumbnailSize,
                                 isFavorite: library.isFavorite(image),
                                 suspendThumbnailLoading: isInspectorResizing,
                                 onSelect: {
-                                    selectImage(image)
+                                    handleThumbnailTap(image)
                                 },
                                 onOpenPreview: {
                                     openPreview(for: image)
@@ -1217,7 +1221,7 @@ struct ContentView: View {
                                     library.toggleFavorite(image)
                                 },
                                 onTrash: {
-                                    library.trashImage(image)
+                                    handleThumbnailTrash(image)
                                 }
                             )
                         }
@@ -1457,6 +1461,7 @@ struct ContentView: View {
         ThumbnailCell(
             image: match.image,
             isSelected: match.image.id == displayedSelectedImage?.id,
+            isMultiSelected: false,
             thumbnailHeight: thumbnailSize,
             isFavorite: library.isFavorite(match.image),
             suspendThumbnailLoading: false,
@@ -1768,6 +1773,7 @@ private func isCollapsedActiveNode(_ node: SidebarNode) -> Bool {
         let isClearingSearch = trimmedValue.isEmpty && (wasSearching || savedBrowseSelection != nil)
 
         if isActivatingSearch {
+            clearMultiSelection()
             savedBrowseSelection = BrowseSelection(
                 categoryID: library.selectedCategory?.id,
                 imageID: library.selectedImage?.id
@@ -1811,6 +1817,7 @@ private func isCollapsedActiveNode(_ node: SidebarNode) -> Bool {
     }
 
     private func clearSearch() {
+        clearMultiSelection()
         pendingSearchTask?.cancel()
         savedBrowseSelection = nil   // prevent handleSearchTextChange from restoring old selection
         activeSearchText = ""
@@ -1825,6 +1832,7 @@ private func isCollapsedActiveNode(_ node: SidebarNode) -> Bool {
             return
         }
 
+        clearMultiSelection()
         pendingSearchTask?.cancel()
         searchText = ""
         activeSearchText = ""
@@ -1862,6 +1870,94 @@ private func isCollapsedActiveNode(_ node: SidebarNode) -> Bool {
         }
     }
 
+    // MARK: - Multi-select helpers
+
+    private func clearMultiSelection() {
+        guard !multiSelectedImageIDs.isEmpty else { return }
+        multiSelectedImageIDs = []
+    }
+
+    private func handleThumbnailTap(_ image: ImageItem) {
+        let flags = NSApp.currentEvent?.modifierFlags ?? []
+        let isCmd = flags.contains(.command)
+        let isShift = flags.contains(.shift)
+
+        if isCmd {
+            handleCmdClick(image)
+        } else if isShift {
+            handleShiftClick(image)
+        } else {
+            clearMultiSelection()
+            selectImage(image)
+        }
+    }
+
+    private func handleCmdClick(_ image: ImageItem) {
+        let primaryID = isSearching ? searchSelectedImageID : library.selectedImageID
+        if let primaryID { multiSelectedImageIDs.insert(primaryID) }
+        if multiSelectedImageIDs.contains(image.id) {
+            multiSelectedImageIDs.remove(image.id)
+        } else {
+            multiSelectedImageIDs.insert(image.id)
+        }
+        selectImage(image)
+    }
+
+    private func handleShiftClick(_ image: ImageItem) {
+        let images = displayImages
+        guard !images.isEmpty else { selectImage(image); return }
+        let anchorID = isSearching ? searchSelectedImageID : library.selectedImageID
+        let anchorIndex = anchorID.flatMap { id in images.firstIndex { $0.id == id } } ?? 0
+        guard let targetIndex = images.firstIndex(where: { $0.id == image.id }) else {
+            selectImage(image); return
+        }
+        let lo = min(anchorIndex, targetIndex)
+        let hi = max(anchorIndex, targetIndex)
+        multiSelectedImageIDs = Set(images[lo...hi].map(\.id))
+        selectImage(image)
+    }
+
+    private func handleThumbnailTrash(_ image: ImageItem) {
+        let primaryID = isSearching ? searchSelectedImageID : library.selectedImageID
+        let isInGroup = multiSelectedImageIDs.contains(image.id) || image.id == primaryID
+        if !multiSelectedImageIDs.isEmpty && isInGroup {
+            confirmAndTrashMultiSelection()
+        } else {
+            library.trashImage(image)
+        }
+    }
+
+    private func confirmAndTrashMultiSelection() {
+        var ids = multiSelectedImageIDs
+        if let pid = isSearching ? searchSelectedImageID : library.selectedImageID { ids.insert(pid) }
+        let images = displayImages.filter { ids.contains($0.id) }
+        guard images.count > 1 else {
+            if let single = images.first { library.trashImage(single) }
+            return
+        }
+        if suppressMultiDeleteConfirm {
+            performMultiDelete(images)
+            return
+        }
+        let alert = NSAlert()
+        alert.messageText = "Move \(images.count) Images to Trash?"
+        alert.informativeText = "This will move \(images.count) selected images to the Trash."
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Move to Trash")
+        alert.addButton(withTitle: "Cancel")
+        alert.showsSuppressionButton = true
+        guard let window = hostWindow else { performMultiDelete(images); return }
+        alert.beginSheetModal(for: window) { [self] response in
+            if alert.suppressionButton?.state == .on { suppressMultiDeleteConfirm = true }
+            if response == .alertFirstButtonReturn { performMultiDelete(images) }
+        }
+    }
+
+    private func performMultiDelete(_ images: [ImageItem]) {
+        clearMultiSelection()
+        library.trashImages(images)
+    }
+
     private func handleKeyEvent(_ event: NSEvent) -> Bool {
         if event.type == .keyUp, isHandledNavigationKeyUp(event) {
             return true
@@ -1875,11 +1971,23 @@ private func isCollapsedActiveNode(_ node: SidebarNode) -> Bool {
             return false
         }
 
-        // keyCode 53 = Escape — clear diff anchor without consuming the event
-        if event.keyCode == 53, diffAnchorImage != nil {
-            withAnimation(.easeOut(duration: 0.18)) {
-                endDiffMode(restoreAnchorSelection: true)
+        // keyCode 53 = Escape — clear diff anchor / multi-select without consuming the event
+        if event.keyCode == 53 {
+            if diffAnchorImage != nil {
+                withAnimation(.easeOut(duration: 0.18)) {
+                    endDiffMode(restoreAnchorSelection: true)
+                }
             }
+            clearMultiSelection()
+        }
+
+        // keyCode 0 = 'a' — Cmd+A selects all images in current view
+        if event.keyCode == 0,
+           event.modifierFlags.contains(.command),
+           !isSearchFieldFocused,
+           !(hostWindow?.firstResponder is NSTextView) {
+            multiSelectedImageIDs = Set(displayImages.map(\.id))
+            return true
         }
 
         if let previewEventResult = handlePreviewHotkey(event) {
@@ -2002,8 +2110,32 @@ private func isCollapsedActiveNode(_ node: SidebarNode) -> Bool {
             scrollBehavior = .jumpToEdge(.bottom)
         }
 
-        moveSelection(delta: delta, absoluteIndex: absoluteIndex, scrollBehavior: scrollBehavior)
+        if event.modifierFlags.contains(.shift) {
+            extendMultiSelection(delta: delta, absoluteIndex: absoluteIndex, scrollBehavior: scrollBehavior)
+        } else {
+            clearMultiSelection()
+            moveSelection(delta: delta, absoluteIndex: absoluteIndex, scrollBehavior: scrollBehavior)
+        }
         return nil
+    }
+
+    private func extendMultiSelection(delta: Int?, absoluteIndex: Int?, scrollBehavior: GridScrollBehavior) {
+        let images = displayImages
+        guard !images.isEmpty else { return }
+        let currentID = displayedSelectedImage?.id
+        let currentIndex = currentID.flatMap { id in images.firstIndex { $0.id == id } } ?? 0
+        let targetIndex: Int
+        if let absoluteIndex {
+            targetIndex = min(max(absoluteIndex, 0), images.count - 1)
+        } else if let delta {
+            let proposed = currentIndex + delta
+            guard images.indices.contains(proposed) else { return }
+            targetIndex = proposed
+        } else { return }
+        guard images.indices.contains(targetIndex) else { return }
+        if let currentID { multiSelectedImageIDs.insert(currentID) }
+        multiSelectedImageIDs.insert(images[targetIndex].id)
+        moveSelection(delta: delta, absoluteIndex: absoluteIndex, scrollBehavior: scrollBehavior)
     }
 
     private func shouldHandleFavoriteHotkey(_ event: NSEvent) -> Bool {
@@ -2024,7 +2156,9 @@ private func isCollapsedActiveNode(_ node: SidebarNode) -> Bool {
             return event
         }
 
-        if let image = displayedSelectedImage {
+        if !multiSelectedImageIDs.isEmpty {
+            confirmAndTrashMultiSelection()
+        } else if let image = displayedSelectedImage {
             library.trashImage(image)
         }
 
@@ -2714,6 +2848,7 @@ private struct ThumbnailCell: View {
     @Environment(\.colorScheme) private var colorScheme
     let image: ImageItem
     let isSelected: Bool
+    let isMultiSelected: Bool
     let thumbnailHeight: Double
     let isFavorite: Bool
     let suspendThumbnailLoading: Bool
@@ -2757,10 +2892,10 @@ private struct ThumbnailCell: View {
         )
         .overlay(
             RoundedRectangle(cornerRadius: 12)
-                .stroke(cardBorderColor, lineWidth: isSelected ? 1.2 : 1)
+                .stroke(cardBorderColor, lineWidth: (isSelected || isMultiSelected) ? 1.2 : 1)
         )
         .shadow(
-            color: colorScheme == .dark ? .clear : Color.black.opacity(isSelected ? 0.10 : 0.06),
+            color: colorScheme == .dark ? .clear : Color.black.opacity((isSelected || isMultiSelected) ? 0.10 : 0.06),
             radius: colorScheme == .dark ? 0 : 8,
             y: colorScheme == .dark ? 0 : 2
         )
@@ -2837,7 +2972,9 @@ private struct ThumbnailCell: View {
         if isSelected {
             return Color.accentColor.opacity(colorScheme == .dark ? 0.14 : 0.24)
         }
-
+        if isMultiSelected {
+            return Color.accentColor.opacity(colorScheme == .dark ? 0.08 : 0.14)
+        }
         return Color(
             nsColor: colorScheme == .dark
                 ? .controlBackgroundColor
@@ -2849,7 +2986,9 @@ private struct ThumbnailCell: View {
         if isSelected {
             return Color.accentColor.opacity(colorScheme == .dark ? 0.9 : 0.75)
         }
-
+        if isMultiSelected {
+            return Color.accentColor.opacity(colorScheme == .dark ? 0.5 : 0.45)
+        }
         return colorScheme == .dark
             ? Color.clear
             : Color.black.opacity(0.08)
