@@ -1,20 +1,16 @@
 # Changelog
 
-## Midstream changes
+## v2.1
 
-### 2026-04-24 · d3eedaa..HEAD
-
-- **Fixed intermittent dead input on launch** — on cold starts (empty filesystem cache, first run after clearing prefs), the initial library scan was running synchronously on the main thread, blocking it long enough for the OS window activation event to be dropped. Mouse clicks and keyboard input would then be silently ignored until a minimize/maximize cycle forced re-activation. The fix moves the initial folder scan off the main thread; the library now loads asynchronously with a brief spinner before content appears.
-
-### 2026-04-23 · 846b139..d3eedaa
-
-- **Kin view** — select any image and open the Kin view from the grid toolbar to see related images grouped as Same Batch, Variants, Possible Upscales, and Related. Hover a thumbnail to see the reason chips that explain why it appeared. Clicking a thumbnail updates the inspector without leaving Kin view; the Back button returns to the library. Navigating via the sidebar dismisses Kin view.
-- **Kin pivot / history** — while in Kin view, clicking the Kin icon in the control strip pivots to show kin of the currently inspected image; the Back button steps through pivot history before returning to the library.
-- **Preview and zoom controls in Kin view** — the Kin control strip now includes the fullscreen preview button and thumbnail zoom control alongside the Back and pivot buttons.
-- **Seed added to metadata index** — generation seed is now stored in the SQLite index alongside model, prompt, and other fields, enabling reliable same-seed variant detection in Kin results. Triggers a one-time background re-index on first launch.
-- **Smart filters and search work across unloaded roots** — registered root folders that haven't been expanded yet now contribute to smart filter results and text search from the moment their background index scan completes, without requiring the folder to be loaded first.
-- **Prompt Diff Viewer** — click the new Compare button (⊞) in the inspector's action strip to pin the current image as A, then click any other image to see a side-by-side diff. The inspector shows A peeking behind B as a stacked-card visual, followed by a diff panel: prompt tags highlighted green (added) or red/struck-through (removed), and a parameter table with changed rows surfaced first. Click the Compare button again, press Escape, or navigate the sidebar to exit compare mode.
-- **Inspector action strip** — the path disclosure toggle and inline path field have been replaced by a clean centered row of four icon buttons: Reveal in Finder, Copy Path, Compare, and Trash. The Compare icon tints accent when active.
+- **Kin view** — select any image and open Kin view to see related images grouped as Same Batch, Variants, Possible Upscales, and Related, with reason chips explaining each match.
+- **Kin pivot / history** — pivot from the inspected image to explore kin-of-kin, then step back through pivot history or return to the library.
+- **Prompt Diff Viewer** — pin one image as A, select another as B, and compare prompt tags and generation parameters directly in the inspector.
+- **Inspector action strip** — Reveal in Finder, Copy Path, Compare, and Trash now live in a compact icon row; Compare highlights while diff mode is active.
+- **Search exclusions** — prefix search terms with `-` to exclude filenames or metadata matches, including exclusion-only searches across indexed libraries.
+- **Stronger cross-root search and smart filters** — unloaded registered roots now participate in search and smart filter results once their background metadata scan completes.
+- **Seed-aware metadata index** — generation seed is indexed alongside model, prompt, sampler, and other fields to improve same-seed variant detection.
+- **ComfyUI metadata display cleanup** — long raw metadata fields are now collapsible in the inspector, keeping JSON-heavy images readable.
+- **Fixed intermittent dead input on launch** — the initial library scan now runs off the main thread, preventing cold-start activation from getting stuck while the app loads.
 
 ## v2.0
 
@@ -37,4 +33,3 @@
 - **Smart Filters** — save any search as a persistent folder in the sidebar. A filter named "turkey" always shows your turkey images. Rename or delete from the right-click menu.
 - **Click folders to browse** — top-level folders are now selectable, not just collapsible. Clicking a folder shows its images; the arrow expands subfolders.
 - **Legacy mode** — optional compatibility mode for TagExplorer-style `gens` folder layouts (Mode menu).
-
