@@ -7,6 +7,7 @@ struct ContentView: View {
     @EnvironmentObject private var library: LibraryStore
     @AppStorage("showInspector") private var showInspector = true
     @AppStorage("imageSortOrder") private var imageSortOrderRawValue = ImageSortOrder.alphabeticalAscending.rawValue
+    @AppStorage("imageSortToggleMode") private var imageSortToggleModeRawValue = ImageSortToggleMode.cycleAll.rawValue
     @AppStorage("thumbnailSizeIndex") private var thumbnailSizeIndex = 2
     @AppStorage("inspectorPanelWidth") private var inspectorPanelWidth = 360.0
     @FocusState private var isSearchFieldFocused: Bool
@@ -165,9 +166,8 @@ struct ContentView: View {
                 Task { await loadFacetValues() }
             }
         } label: {
-            Label(showFilterBar ? "Hide Filters" : "Show Filters", systemImage: icon)
+            toolbarIconLabel(showFilterBar ? "Hide Filters" : "Show Filters", systemImage: icon)
         }
-        .labelStyle(.iconOnly)
         .help(showFilterBar ? "Hide Filter Bar" : "Show Filter Bar")
         .foregroundStyle(hasActive ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(Color.primary))
     }
@@ -903,6 +903,11 @@ struct ContentView: View {
         nonmutating set { imageSortOrderRawValue = newValue.rawValue }
     }
 
+    private var imageSortToggleMode: ImageSortToggleMode {
+        get { ImageSortToggleMode(rawValue: imageSortToggleModeRawValue) ?? .cycleAll }
+        nonmutating set { imageSortToggleModeRawValue = newValue.rawValue }
+    }
+
     private var thumbnailSize: Double {
         Self.thumbnailSizes[clampedThumbnailSizeIndex]
     }
@@ -1212,21 +1217,36 @@ struct ContentView: View {
 
     private var sortButton: some View {
         Button {
-            imageSortOrder = imageSortOrder.toggled
+            imageSortOrder = imageSortToggleMode.nextOrder(after: imageSortOrder)
         } label: {
-            Label(imageSortOrder.helpText, systemImage: imageSortOrder.systemImage)
+            toolbarIconLabel(imageSortOrder.helpText, systemImage: imageSortOrder.systemImage)
         }
-        .labelStyle(.iconOnly)
-        .help(imageSortOrder.helpText)
+        .fixedSize()
+        .help("\(imageSortOrder.helpText). \(imageSortToggleMode.helpText)")
+        .contextMenu {
+            Button("Cycle All Sort Modes") {
+                imageSortToggleMode = .cycleAll
+            }
+
+            Divider()
+
+            ForEach(ImageSortOrder.allCases) { order in
+                Button {
+                    imageSortOrder = order
+                    imageSortToggleMode = ImageSortToggleMode.explicitMode(for: order)
+                } label: {
+                    Label(order.menuTitle, systemImage: order == imageSortOrder ? "checkmark" : order.systemImage)
+                }
+            }
+        }
     }
 
     private var previewButton: some View {
         Button {
             presentPreview()
         } label: {
-            Label("Open Preview", systemImage: "arrow.up.left.and.arrow.down.right")
+            toolbarIconLabel("Open Preview", systemImage: "arrow.up.left.and.arrow.down.right")
         }
-        .labelStyle(.iconOnly)
         .help("Open Large Preview")
         .disabled(displayedSelectedImage == nil)
     }
@@ -1259,12 +1279,16 @@ struct ContentView: View {
             }
             isKinActive.toggle()
         } label: {
-            Label("Kin", systemImage: "point.3.connected.trianglepath.dotted")
+            toolbarIconLabel("Kin", systemImage: "point.3.connected.trianglepath.dotted")
         }
-        .labelStyle(.iconOnly)
         .help(isKinActive ? "Exit Kin View" : "Show Kin")
         .disabled(displayedSelectedImage == nil && !isKinActive)
         .foregroundStyle(isKinActive ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(Color.primary))
+    }
+
+    private func toolbarIconLabel(_ title: String, systemImage: String) -> some View {
+        Label(title, systemImage: systemImage)
+            .labelStyle(.iconOnly)
     }
 
     @ViewBuilder
@@ -2325,23 +2349,44 @@ private final class DisplayImageCache: ObservableObject {
 
         cachedKey = key
         cachedImages = category.images.sorted { lhs, rhs in
-            let comparison = lhs.displayLabel.localizedCaseInsensitiveCompare(rhs.displayLabel)
-
             switch order {
             case .alphabeticalAscending:
-                if comparison == .orderedSame {
-                    return lhs.displayName.localizedCaseInsensitiveCompare(rhs.displayName) == .orderedAscending
-                }
-                return comparison == .orderedAscending
+                return Self.isNameBefore(lhs, rhs, ascending: true)
             case .alphabeticalDescending:
-                if comparison == .orderedSame {
-                    return lhs.displayName.localizedCaseInsensitiveCompare(rhs.displayName) == .orderedDescending
-                }
-                return comparison == .orderedDescending
+                return Self.isNameBefore(lhs, rhs, ascending: false)
+            case .createdNewestFirst:
+                return Self.isDateBefore(lhs.createdAt, rhs.createdAt, ascending: false)
+                    ?? Self.isNameBefore(lhs, rhs, ascending: true)
+            case .createdOldestFirst:
+                return Self.isDateBefore(lhs.createdAt, rhs.createdAt, ascending: true)
+                    ?? Self.isNameBefore(lhs, rhs, ascending: true)
             }
         }
 
         return cachedImages
+    }
+
+    private static func isNameBefore(_ lhs: ImageItem, _ rhs: ImageItem, ascending: Bool) -> Bool {
+        let comparison = lhs.displayLabel.localizedCaseInsensitiveCompare(rhs.displayLabel)
+        if comparison == .orderedSame {
+            let fallback = lhs.displayName.localizedCaseInsensitiveCompare(rhs.displayName)
+            return ascending ? fallback == .orderedAscending : fallback == .orderedDescending
+        }
+        return ascending ? comparison == .orderedAscending : comparison == .orderedDescending
+    }
+
+    private static func isDateBefore(_ lhs: Date?, _ rhs: Date?, ascending: Bool) -> Bool? {
+        switch (lhs, rhs) {
+        case let (lhs?, rhs?):
+            guard lhs != rhs else { return nil }
+            return ascending ? lhs < rhs : lhs > rhs
+        case (nil, nil):
+            return nil
+        case (nil, _?):
+            return false
+        case (_?, nil):
+            return true
+        }
     }
 }
 
@@ -2739,9 +2784,11 @@ private struct ThumbnailCell: View {
     }
 }
 
-private enum ImageSortOrder: String, CaseIterable, Identifiable {
+enum ImageSortOrder: String, CaseIterable, Identifiable {
     case alphabeticalAscending
     case alphabeticalDescending
+    case createdNewestFirst
+    case createdOldestFirst
 
     var id: String { rawValue }
 
@@ -2751,6 +2798,23 @@ private enum ImageSortOrder: String, CaseIterable, Identifiable {
             return "Sort: A to Z"
         case .alphabeticalDescending:
             return "Sort: Z to A"
+        case .createdNewestFirst:
+            return "Sort: Date Created, Newest First"
+        case .createdOldestFirst:
+            return "Sort: Date Created, Oldest First"
+        }
+    }
+
+    var menuTitle: String {
+        switch self {
+        case .alphabeticalAscending:
+            return "Name A to Z"
+        case .alphabeticalDescending:
+            return "Name Z to A"
+        case .createdNewestFirst:
+            return "Date Created Newest"
+        case .createdOldestFirst:
+            return "Date Created Oldest"
         }
     }
 
@@ -2760,15 +2824,60 @@ private enum ImageSortOrder: String, CaseIterable, Identifiable {
             return "arrow.down.circle"
         case .alphabeticalDescending:
             return "arrow.up.circle"
+        case .createdNewestFirst:
+            return "calendar.badge.clock"
+        case .createdOldestFirst:
+            return "calendar"
         }
     }
 
-    var toggled: ImageSortOrder {
+    var next: ImageSortOrder {
         switch self {
         case .alphabeticalAscending:
             return .alphabeticalDescending
         case .alphabeticalDescending:
+            return .createdNewestFirst
+        case .createdNewestFirst:
+            return .createdOldestFirst
+        case .createdOldestFirst:
             return .alphabeticalAscending
+        }
+    }
+}
+
+enum ImageSortToggleMode: String {
+    case cycleAll
+    case alphabetical
+    case createdDate
+
+    var helpText: String {
+        switch self {
+        case .cycleAll:
+            return "Click to cycle all modes, or right-click to choose."
+        case .alphabetical:
+            return "Click to toggle name direction, or right-click to choose."
+        case .createdDate:
+            return "Click to toggle date direction, or right-click to choose."
+        }
+    }
+
+    static func explicitMode(for order: ImageSortOrder) -> ImageSortToggleMode {
+        switch order {
+        case .alphabeticalAscending, .alphabeticalDescending:
+            return .alphabetical
+        case .createdNewestFirst, .createdOldestFirst:
+            return .createdDate
+        }
+    }
+
+    func nextOrder(after order: ImageSortOrder) -> ImageSortOrder {
+        switch self {
+        case .cycleAll:
+            return order.next
+        case .alphabetical:
+            return order == .alphabeticalAscending ? .alphabeticalDescending : .alphabeticalAscending
+        case .createdDate:
+            return order == .createdNewestFirst ? .createdOldestFirst : .createdNewestFirst
         }
     }
 }

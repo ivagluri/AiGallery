@@ -645,7 +645,7 @@ final class LibraryStore: ObservableObject {
     private static func loadImages(in folderURL: URL, profile: any LibraryProfile) throws -> [ImageItem] {
         let imageURLs = try FileManager.default.contentsOfDirectory(
             at: folderURL,
-            includingPropertiesForKeys: [.isRegularFileKey],
+            includingPropertiesForKeys: [.isRegularFileKey, .creationDateKey],
             options: [.skipsHiddenFiles]
         )
         .filter(isSupportedImage)
@@ -1008,11 +1008,13 @@ final class LibraryStore: ObservableObject {
 
     private static func makeImageItem(from url: URL, profile: any LibraryProfile) -> ImageItem {
         let displayName = url.deletingPathExtension().lastPathComponent
+        let createdAt = (try? url.resourceValues(forKeys: [.creationDateKey]))?.creationDate
         return ImageItem(
             id: url.path,
             fileURL: url,
             displayName: displayName,
-            displayLabel: profile.displayLabel(for: displayName)
+            displayLabel: profile.displayLabel(for: displayName),
+            createdAt: createdAt
         )
     }
 

@@ -18,6 +18,7 @@ struct ImageItem: Identifiable, Hashable {
     let fileURL: URL
     let displayName: String
     let displayLabel: String
+    let createdAt: Date?
 }
 
 struct ImageMetadata: Hashable {

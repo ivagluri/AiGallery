@@ -20,6 +20,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 struct AiGalleryApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var library = LibraryStore()
+    @AppStorage("imageSortOrder") private var imageSortOrderRawValue = ImageSortOrder.alphabeticalAscending.rawValue
+    @AppStorage("imageSortToggleMode") private var imageSortToggleModeRawValue = ImageSortToggleMode.cycleAll.rawValue
+
+    private var imageSortOrder: ImageSortOrder {
+        get { ImageSortOrder(rawValue: imageSortOrderRawValue) ?? .alphabeticalAscending }
+        nonmutating set { imageSortOrderRawValue = newValue.rawValue }
+    }
+
+    private var imageSortToggleMode: ImageSortToggleMode {
+        get { ImageSortToggleMode(rawValue: imageSortToggleModeRawValue) ?? .cycleAll }
+        nonmutating set { imageSortToggleModeRawValue = newValue.rawValue }
+    }
 
     var body: some Scene {
         WindowGroup {
@@ -41,6 +53,24 @@ struct AiGalleryApp: App {
                     library.addRootFolder()
                 }
                 .keyboardShortcut("o")
+            }
+
+            CommandMenu("Sort") {
+                Button("Cycle All Sort Modes") {
+                    imageSortToggleMode = .cycleAll
+                    imageSortOrder = imageSortOrder.next
+                }
+
+                Divider()
+
+                ForEach(ImageSortOrder.allCases) { order in
+                    Button {
+                        imageSortOrder = order
+                        imageSortToggleMode = ImageSortToggleMode.explicitMode(for: order)
+                    } label: {
+                        Label(order.menuTitle, systemImage: order == imageSortOrder ? "checkmark" : order.systemImage)
+                    }
+                }
             }
         }
     }
