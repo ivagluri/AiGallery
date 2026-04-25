@@ -585,15 +585,21 @@ final class LibraryStore: ObservableObject {
         GeneralLibraryProfile().search(matching: query, in: searchIndex, limit: limit)
     }
 
-    func searchWithMetadata(matching query: String, limit: Int, limitToRoot: URL? = nil) async -> SearchResult {
+    func searchWithMetadata(matching query: String, limit: Int, limitToFolder: URL? = nil) async -> SearchResult {
         let effectiveSearchIndex: [ImageItem]
         let effectiveMetaIndexes: [URL: MetadataIndex]
-        if let root = limitToRoot {
-            effectiveSearchIndex = searchIndexByRoot[root] ?? []
-            effectiveMetaIndexes = metadataIndexes[root].map { [root: $0] } ?? [:]
+        let folderPathPrefix: String?
+        if let folder = limitToFolder {
+            let prefix = folder.path.hasSuffix("/") ? folder.path : folder.path + "/"
+            let root = rootURLs.first(where: { folder.path.hasPrefix($0.path) })
+            let rootImages = root.flatMap { searchIndexByRoot[$0] } ?? searchIndex
+            effectiveSearchIndex = rootImages.filter { $0.fileURL.path.hasPrefix(prefix) }
+            effectiveMetaIndexes = root.flatMap { r in metadataIndexes[r].map { [r: $0] } } ?? metadataIndexes
+            folderPathPrefix = prefix
         } else {
             effectiveSearchIndex = searchIndex
             effectiveMetaIndexes = metadataIndexes
+            folderPathPrefix = nil
         }
 
         let filenameResult = GeneralLibraryProfile().search(matching: query, in: effectiveSearchIndex, limit: limit)
@@ -635,9 +641,12 @@ final class LibraryStore: ObservableObject {
         let duplicatePathSet = parsedQuery.requiredTerms.isEmpty
             ? Set(effectiveSearchIndex.map(\.id))
             : filenamePathSet
-        let newMetadataPaths = (matchingMetadataPaths ?? [])
+        var newMetadataPaths = (matchingMetadataPaths ?? [])
             .subtracting(duplicatePathSet)
             .subtracting(metadataExcludedPaths)
+        if let prefix = folderPathPrefix {
+            newMetadataPaths = newMetadataPaths.filter { $0.hasPrefix(prefix) }
+        }
 
         // Resolve paths: use in-memory item if available, otherwise build lightweight item from path.
         let loadedItems = Dictionary(uniqueKeysWithValues: searchIndex.map { ($0.id, $0) })

@@ -104,13 +104,13 @@ struct ContentView: View {
             // Re-run active search so results from a removed root are evicted.
             let query = trimmedActiveSearchText
             if !query.isEmpty {
-                let scopeRoot = searchScopeCurrentRootOnly ? activeScopeRootURL : nil
+                let scopeFolder = searchScopeCurrentRootOnly ? activeScopeFolderURL : nil
                 pendingSearchTask?.cancel()
                 pendingSearchTask = Task { @MainActor in
                     activeSearchResults = await library.searchWithMetadata(
                         matching: query,
                         limit: Self.maximumSearchResults,
-                        limitToRoot: scopeRoot
+                        limitToFolder: scopeFolder
                     )
                 }
             }
@@ -177,8 +177,10 @@ struct ContentView: View {
         .foregroundStyle(hasActive ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(Color.primary))
     }
 
-    private var activeScopeRootURL: URL? {
-        library.categories.first(where: { $0.id == library.selectedCategoryID })?.sourceRootURL
+    private var activeScopeFolderURL: URL? {
+        guard let cat = library.categories.first(where: { $0.id == library.selectedCategoryID }),
+              !cat.isSynthetic else { return nil }
+        return cat.folderURL
     }
 
     private var toolbarSearchField: some View {
@@ -217,7 +219,7 @@ struct ContentView: View {
                 .help(searchScopeCurrentRootOnly
                     ? "Searching current folder only — click or ⌘⌥L to search all folders"
                     : "Searching all folders — click or ⌘⌥L to limit to current folder")
-                .disabled(!searchScopeCurrentRootOnly && activeScopeRootURL == nil)
+                .disabled(!searchScopeCurrentRootOnly && activeScopeFolderURL == nil)
             }
         }
         .padding(.horizontal, 10)
@@ -1786,7 +1788,7 @@ private func isCollapsedActiveNode(_ node: SidebarNode) -> Bool {
         let visibleCount = activeSearchResults.images.count
         let matchLabel = resultCount == 1 ? "match" : "matches"
         let scopeSuffix: String
-        if searchScopeCurrentRootOnly, let root = activeScopeRootURL {
+        if searchScopeCurrentRootOnly, let root = activeScopeFolderURL {
             scopeSuffix = " in \(root.lastPathComponent)"
         } else {
             scopeSuffix = ""
@@ -1846,7 +1848,7 @@ private func isCollapsedActiveNode(_ node: SidebarNode) -> Bool {
             return
         }
 
-        let scopeRoot = searchScopeCurrentRootOnly ? activeScopeRootURL : nil
+        let scopeFolder = searchScopeCurrentRootOnly ? activeScopeFolderURL : nil
         pendingSearchTask = Task { @MainActor in
             try? await Task.sleep(for: .milliseconds(180))
             guard !Task.isCancelled else { return }
@@ -1854,7 +1856,7 @@ private func isCollapsedActiveNode(_ node: SidebarNode) -> Bool {
             activeSearchResults = await library.searchWithMetadata(
                 matching: trimmedValue,
                 limit: Self.maximumSearchResults,
-                limitToRoot: scopeRoot
+                limitToFolder: scopeFolder
             )
             guard !Task.isCancelled else { return }
             if let searchSelectedImageID, activeSearchResults.images.contains(where: { $0.id == searchSelectedImageID }) {
