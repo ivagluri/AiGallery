@@ -31,8 +31,7 @@ final class LibraryStore: ObservableObject {
     private var filterTask: Task<Void, Never>?
     private var smartFilterTask: Task<Void, Never>?
     private var favoriteImageIDs: Set<String>
-    private var filteredImagePaths: Set<String> = []
-    private(set) var filterScopeFolderURL: URL?
+    @Published private(set) var filteredImagePaths: Set<String> = []
     private var smartFilterResults: [UUID: [ImageItem]] = [:]
 
     // MARK: - Derived
@@ -45,11 +44,6 @@ final class LibraryStore: ObservableObject {
         return indexProgressByRoot.values.reduce(0, +) / Double(indexProgressByRoot.count)
     }
     var hasAnyMetadataIndex: Bool { !metadataIndexes.isEmpty }
-    var selectedFolderURL: URL? {
-        guard let cat = categories.first(where: { $0.id == selectedCategoryID }),
-              !cat.isSynthetic else { return nil }
-        return cat.folderURL
-    }
 
     // MARK: - UserDefaults keys
 
@@ -439,9 +433,6 @@ final class LibraryStore: ObservableObject {
     func setMetadataFilter(_ filter: MetadataFilter) {
         activeMetadataFilters.removeAll { $0.field == filter.field }
         activeMetadataFilters.append(filter)
-        if let folder = selectedFolderURL {
-            filterScopeFolderURL = folder
-        }
         applyMetadataFilters()
     }
 
@@ -453,11 +444,7 @@ final class LibraryStore: ObservableObject {
     func clearMetadataFilters() {
         activeMetadataFilters = []
         filteredImagePaths = []
-        filterScopeFolderURL = nil
         filterTask?.cancel()
-        rebuildCategories()
-        selectedCategoryID = Self.validCategoryID(current: selectedCategoryID, categories: categories)
-        persistSelectedCategoryID(selectedCategoryID)
     }
 
     // MARK: - Metadata info
@@ -744,39 +731,18 @@ final class LibraryStore: ObservableObject {
         filterTask?.cancel()
         guard !activeMetadataFilters.isEmpty, !metadataIndexes.isEmpty else {
             filteredImagePaths = []
-            rebuildCategories()
-            selectedCategoryID = Self.validCategoryID(current: selectedCategoryID, categories: categories)
-            persistSelectedCategoryID(selectedCategoryID)
             return
         }
         let filters = activeMetadataFilters
-        let scopeFolder = filterScopeFolderURL
-        let pathPrefix: String?
-        let indexes: [MetadataIndex]
-        if let folder = scopeFolder {
-            let prefix = folder.path.hasSuffix("/") ? folder.path : folder.path + "/"
-            pathPrefix = prefix
-            let root = rootURLs.first { folder.path.hasPrefix($0.path) }
-            indexes = root.flatMap { metadataIndexes[$0] }.map { [$0] } ?? Array(metadataIndexes.values)
-        } else {
-            pathPrefix = nil
-            indexes = Array(metadataIndexes.values)
-        }
+        let indexes = Array(metadataIndexes.values)
         filterTask = Task {
             var acc = Set<String>()
             for index in indexes {
-                acc.formUnion(await index.imagePaths(matching: filters, withinFolderPrefix: pathPrefix))
+                acc.formUnion(await index.imagePaths(matching: filters))
             }
             guard !Task.isCancelled else { return }
-            let finalPaths = acc
             await MainActor.run { [weak self] in
-                guard let self else { return }
-                self.filteredImagePaths = finalPaths
-                self.rebuildCategories()
-                self.selectedCategoryID = Self.validCategoryID(
-                    current: Self.filteredID, categories: self.categories
-                )
-                self.persistSelectedCategoryID(self.selectedCategoryID)
+                self?.filteredImagePaths = acc
             }
         }
     }
@@ -911,19 +877,6 @@ final class LibraryStore: ObservableObject {
 
         var syntheticCategories: [Category] = []
         let placeholder = URL(fileURLWithPath: "/")
-
-        if !filteredImagePaths.isEmpty {
-            let filteredImages = allSourceImages
-                .filter { filteredImagePaths.contains($0.id) }
-                .sorted { $0.displayLabel.localizedCaseInsensitiveCompare($1.displayLabel) == .orderedAscending }
-            if !filteredImages.isEmpty {
-                syntheticCategories.append(Category(
-                    id: Self.filteredID, name: "Filtered", shortName: "Filtered",
-                    pathParts: ["Filtered"], rootGroupID: Self.filteredID, rootGroupName: "Filtered",
-                    folderURL: placeholder, images: filteredImages, isSynthetic: true, sourceRootURL: nil
-                ))
-            }
-        }
 
         if !favoriteImages.isEmpty {
             syntheticCategories.append(Category(
