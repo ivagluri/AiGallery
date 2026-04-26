@@ -32,6 +32,7 @@ final class LibraryStore: ObservableObject {
     private var smartFilterTask: Task<Void, Never>?
     private var favoriteImageIDs: Set<String>
     private var filteredImagePaths: Set<String> = []
+    private(set) var filterScopeFolderURL: URL?
     private var smartFilterResults: [UUID: [ImageItem]] = [:]
 
     // MARK: - Derived
@@ -44,6 +45,11 @@ final class LibraryStore: ObservableObject {
         return indexProgressByRoot.values.reduce(0, +) / Double(indexProgressByRoot.count)
     }
     var hasAnyMetadataIndex: Bool { !metadataIndexes.isEmpty }
+    var selectedFolderURL: URL? {
+        guard let cat = categories.first(where: { $0.id == selectedCategoryID }),
+              !cat.isSynthetic else { return nil }
+        return cat.folderURL
+    }
 
     // MARK: - UserDefaults keys
 
@@ -433,6 +439,9 @@ final class LibraryStore: ObservableObject {
     func setMetadataFilter(_ filter: MetadataFilter) {
         activeMetadataFilters.removeAll { $0.field == filter.field }
         activeMetadataFilters.append(filter)
+        if let folder = selectedFolderURL {
+            filterScopeFolderURL = folder
+        }
         applyMetadataFilters()
     }
 
@@ -444,6 +453,7 @@ final class LibraryStore: ObservableObject {
     func clearMetadataFilters() {
         activeMetadataFilters = []
         filteredImagePaths = []
+        filterScopeFolderURL = nil
         filterTask?.cancel()
         rebuildCategories()
         selectedCategoryID = Self.validCategoryID(current: selectedCategoryID, categories: categories)
@@ -678,11 +688,23 @@ final class LibraryStore: ObservableObject {
         return termPaths
     }
 
-    func facetValues(for field: MetadataField) async -> [(value: String, count: Int)] {
+    func facetValues(for field: MetadataField, scopedToFolder folderURL: URL? = nil) async -> [(value: String, count: Int)] {
         var merged: [String: Int] = [:]
-        for index in metadataIndexes.values {
-            for (value, count) in await index.facetValues(for: field) {
-                merged[value, default: 0] += count
+        if let folder = folderURL {
+            let prefix = folder.path.hasSuffix("/") ? folder.path : folder.path + "/"
+            let root = rootURLs.first { folder.path.hasPrefix($0.path) }
+            let relevantIndexes: [MetadataIndex] = root.flatMap { metadataIndexes[$0] }.map { [$0] }
+                ?? Array(metadataIndexes.values)
+            for index in relevantIndexes {
+                for (value, count) in await index.facetValues(for: field, withinFolderPrefix: prefix) {
+                    merged[value, default: 0] += count
+                }
+            }
+        } else {
+            for index in metadataIndexes.values {
+                for (value, count) in await index.facetValues(for: field) {
+                    merged[value, default: 0] += count
+                }
             }
         }
         return merged.sorted { $0.value > $1.value }.map { (value: $0.key, count: $0.value) }
@@ -728,11 +750,22 @@ final class LibraryStore: ObservableObject {
             return
         }
         let filters = activeMetadataFilters
-        let indexes = Array(metadataIndexes.values)
+        let scopeFolder = filterScopeFolderURL
+        let pathPrefix: String?
+        let indexes: [MetadataIndex]
+        if let folder = scopeFolder {
+            let prefix = folder.path.hasSuffix("/") ? folder.path : folder.path + "/"
+            pathPrefix = prefix
+            let root = rootURLs.first { folder.path.hasPrefix($0.path) }
+            indexes = root.flatMap { metadataIndexes[$0] }.map { [$0] } ?? Array(metadataIndexes.values)
+        } else {
+            pathPrefix = nil
+            indexes = Array(metadataIndexes.values)
+        }
         filterTask = Task {
             var acc = Set<String>()
             for index in indexes {
-                acc.formUnion(await index.imagePaths(matching: filters))
+                acc.formUnion(await index.imagePaths(matching: filters, withinFolderPrefix: pathPrefix))
             }
             guard !Task.isCancelled else { return }
             let finalPaths = acc

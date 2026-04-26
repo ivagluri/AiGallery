@@ -133,17 +133,24 @@ actor MetadataIndex {
         onProgress(1.0)
     }
 
-    func facetValues(for field: MetadataField) -> [(value: String, count: Int)] {
+    func facetValues(for field: MetadataField, withinFolderPrefix prefix: String? = nil) -> [(value: String, count: Int)] {
         guard let db else { return [] }
         let col = field.columnName
+        let whereClause = prefix != nil
+            ? "WHERE \(col) IS NOT NULL AND path LIKE ? ESCAPE '\\'"
+            : "WHERE \(col) IS NOT NULL"
         let sql = """
         SELECT \(col), COUNT(*) AS n FROM indexed_images
-        WHERE \(col) IS NOT NULL
+        \(whereClause)
         GROUP BY \(col) ORDER BY n DESC
         """
         var stmt: OpaquePointer?
         var results: [(String, Int)] = []
         if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
+            if let prefix {
+                let pattern = prefix + "%"
+                sqlite3_bind_text(stmt, 1, pattern, -1, SQLITE_TRANSIENT)
+            }
             while sqlite3_step(stmt) == SQLITE_ROW {
                 let value = String(cString: sqlite3_column_text(stmt, 0))
                 let count = Int(sqlite3_column_int(stmt, 1))
@@ -154,15 +161,19 @@ actor MetadataIndex {
         return results
     }
 
-    func imagePaths(matching filters: [MetadataFilter]) -> Set<String> {
+    func imagePaths(matching filters: [MetadataFilter], withinFolderPrefix prefix: String? = nil) -> Set<String> {
         guard let db, !filters.isEmpty else { return [] }
         let clauses = filters.map { "\($0.field.columnName) = ?" }.joined(separator: " AND ")
-        let sql = "SELECT path FROM indexed_images WHERE \(clauses)"
+        let prefixClause = prefix != nil ? " AND path LIKE ? ESCAPE '\\'" : ""
+        let sql = "SELECT path FROM indexed_images WHERE \(clauses)\(prefixClause)"
         var stmt: OpaquePointer?
         var paths = Set<String>()
         if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
             for (i, filter) in filters.enumerated() {
                 sqlite3_bind_text(stmt, Int32(i + 1), filter.value, -1, SQLITE_TRANSIENT)
+            }
+            if let prefix {
+                sqlite3_bind_text(stmt, Int32(filters.count + 1), prefix + "%", -1, SQLITE_TRANSIENT)
             }
             while sqlite3_step(stmt) == SQLITE_ROW {
                 paths.insert(String(cString: sqlite3_column_text(stmt, 0)))

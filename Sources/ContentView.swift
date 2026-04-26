@@ -121,6 +121,11 @@ struct ContentView: View {
                 Task { await loadFacetValues() }
             }
         }
+        .onChange(of: library.selectedCategoryID) { _ in
+            if showFilterBar {
+                Task { await loadFacetValues() }
+            }
+        }
         .onChange(of: searchText) { newValue in
             handleSearchTextChange(newValue)
         }
@@ -187,6 +192,10 @@ struct ContentView: View {
         guard let cat = library.categories.first(where: { $0.id == library.selectedCategoryID }),
               !cat.isSynthetic else { return nil }
         return cat.folderURL
+    }
+
+    private var effectiveFilterScopeURL: URL? {
+        library.filterScopeFolderURL ?? activeScopeFolderURL
     }
 
     private var toolbarSearchField: some View {
@@ -1223,9 +1232,10 @@ struct ContentView: View {
 
     private func loadFacetValues() async {
         guard library.hasAnyMetadataIndex else { return }
+        let scopeURL = effectiveFilterScopeURL
         var result: [MetadataField: [(value: String, count: Int)]] = [:]
         for field in MetadataField.allCases {
-            result[field] = await library.facetValues(for: field)
+            result[field] = await library.facetValues(for: field, scopedToFolder: scopeURL)
         }
         facetValues = result
     }
