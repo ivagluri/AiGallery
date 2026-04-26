@@ -137,7 +137,7 @@ actor MetadataIndex {
         guard let db else { return [] }
         let col = field.columnName
         let whereClause = prefix != nil
-            ? "WHERE \(col) IS NOT NULL AND path LIKE ? ESCAPE '\\'"
+            ? "WHERE \(col) IS NOT NULL AND path LIKE ? ESCAPE '\\' AND path NOT LIKE ? ESCAPE '\\'"
             : "WHERE \(col) IS NOT NULL"
         let sql = """
         SELECT \(col), COUNT(*) AS n FROM indexed_images
@@ -148,8 +148,10 @@ actor MetadataIndex {
         var results: [(String, Int)] = []
         if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
             if let prefix {
-                let pattern = prefix + "%"
-                sqlite3_bind_text(stmt, 1, pattern, -1, SQLITE_TRANSIENT)
+                let directPattern = prefix + "%"
+                let descendantPattern = prefix + "%/%"
+                sqlite3_bind_text(stmt, 1, directPattern, -1, SQLITE_TRANSIENT)
+                sqlite3_bind_text(stmt, 2, descendantPattern, -1, SQLITE_TRANSIENT)
             }
             while sqlite3_step(stmt) == SQLITE_ROW {
                 let value = String(cString: sqlite3_column_text(stmt, 0))
