@@ -23,6 +23,16 @@ struct SlideshowRootView: View {
                 )
             }
 
+            if viewModel.settings.overlayEnabled, viewModel.settings.overlayPreset != .none,
+               let image = viewModel.currentImage {
+                SlideshowOverlayView(
+                    preset: viewModel.settings.overlayPreset,
+                    position: viewModel.settings.overlayPosition,
+                    image: image,
+                    metadata: viewModel.currentMetadata
+                )
+            }
+
             if hudVisible {
                 SlideshowControlsHUD(
                     isPaused: viewModel.isPaused,
@@ -236,5 +246,89 @@ fileprivate final class SlideshowKeyHandlerView: NSView {
     override func keyDown(with event: NSEvent) {
         if coordinator?.onKeyDown(event) == true { return }
         super.keyDown(with: event)
+    }
+}
+
+// MARK: - Text Overlay
+
+private struct SlideshowOverlayView: View {
+    let preset: SlideshowOverlayPreset
+    let position: SlideshowOverlayPosition
+    let image: ImageItem
+    let metadata: ImageMetadata?
+
+    var body: some View {
+        ZStack(alignment: position.alignment) {
+            Color.clear
+            if let text = resolvedText {
+                overlayBubble(text)
+                    .padding(edgePadding(for: position))
+            }
+        }
+    }
+
+    private func overlayBubble(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 13, weight: .medium))
+            .foregroundStyle(.primary)
+            .multilineTextAlignment(textAlignment(for: position))
+            .lineLimit(preset == .fullPrompt ? 10 : 2)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 9)
+            .frame(maxWidth: 480, alignment: .leading)
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+
+    private var resolvedText: String? {
+        switch preset {
+        case .none:
+            return nil
+        case .filename:
+            return image.displayName
+        case .basicInfo:
+            var parts = [image.displayName]
+            if let model = metadata?.param("Model"), !model.isEmpty { parts.append(model) }
+            if let steps = metadata?.param("Steps"), !steps.isEmpty { parts.append("\(steps) steps") }
+            if let cfg = metadata?.param("CFG scale"), !cfg.isEmpty { parts.append("cfg \(cfg)") }
+            return parts.joined(separator: " · ")
+        case .fullPrompt:
+            let prompt = metadata?.prompt ?? ""
+            let model = metadata?.param("Model") ?? ""
+            var sections: [String] = []
+            if !prompt.isEmpty { sections.append(prompt) }
+            let footer = [image.displayName, model].filter { !$0.isEmpty }.joined(separator: " · ")
+            if !footer.isEmpty { sections.append(footer) }
+            return sections.isEmpty ? image.displayName : sections.joined(separator: "\n\n")
+        }
+    }
+
+    private func edgePadding(for pos: SlideshowOverlayPosition) -> EdgeInsets {
+        let side: CGFloat = 20
+        let top: CGFloat = 20
+        let bottom: CGFloat = 96 // clear the HUD capsule
+        switch pos {
+        case .topLeft:    return EdgeInsets(top: top,    leading: side, bottom: 0,      trailing: 0)
+        case .topRight:   return EdgeInsets(top: top,    leading: 0,    bottom: 0,      trailing: side)
+        case .bottomLeft: return EdgeInsets(top: 0,      leading: side, bottom: bottom, trailing: 0)
+        case .bottomCenter: return EdgeInsets(top: 0,    leading: side, bottom: bottom, trailing: side)
+        case .bottomRight: return EdgeInsets(top: 0,     leading: 0,    bottom: bottom, trailing: side)
+        }
+    }
+
+    private func textAlignment(for pos: SlideshowOverlayPosition) -> TextAlignment {
+        switch pos {
+        case .topLeft, .bottomLeft: return .leading
+        case .topRight, .bottomRight: return .trailing
+        case .bottomCenter: return .center
+        }
+    }
+}
+
+// MARK: - Metadata helper
+
+private extension ImageMetadata {
+    func param(_ keyword: String) -> String? {
+        generationParameters.first { $0.keyword.caseInsensitiveCompare(keyword) == .orderedSame }?.value
     }
 }

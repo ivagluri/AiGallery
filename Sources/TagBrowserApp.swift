@@ -12,6 +12,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidBecomeActive(_ notification: Notification) {
+        guard !SlideshowWindowController.shared.isPresented else { return }
         NSApp.windows.first { $0.canBecomeKey }?.makeKeyAndOrderFront(nil)
     }
 }

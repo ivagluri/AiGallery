@@ -6,6 +6,7 @@ import SwiftUI
 @MainActor
 final class SlideshowViewModel: ObservableObject {
     @Published var currentImage: ImageItem?
+    @Published var currentMetadata: ImageMetadata?
     @Published var isPaused = false
     @Published var imageCount = 0
     @Published var displayIndex = 0
@@ -64,7 +65,8 @@ final class SlideshowWindowController: NSObject, NSWindowDelegate {
         let screen = NSScreen.main ?? NSScreen.screens.first!
         let win = NSWindow(
             contentRect: screen.frame,
-            styleMask: [.titled, .closable, .fullSizeContentView],
+            // .resizable is required for toggleFullScreen to succeed
+            styleMask: [.titled, .closable, .resizable, .fullSizeContentView],
             backing: .buffered,
             defer: false
         )
@@ -79,7 +81,10 @@ final class SlideshowWindowController: NSObject, NSWindowDelegate {
         isPresented = true
 
         win.makeKeyAndOrderFront(nil)
-        win.toggleFullScreen(nil)
+        // Defer toggleFullScreen one runloop tick to let the window fully present
+        DispatchQueue.main.async {
+            win.toggleFullScreen(nil)
+        }
 
         scheduleTimer()
         prefetchNext()
@@ -109,6 +114,7 @@ final class SlideshowWindowController: NSObject, NSWindowDelegate {
             currentIndex = next
             syncViewModel()
             prefetchNext()
+            scheduleTimer()
         } else {
             dismiss()
         }
@@ -205,8 +211,15 @@ final class SlideshowWindowController: NSObject, NSWindowDelegate {
     // MARK: - ViewModel sync
 
     private func syncViewModel() {
-        viewModel.currentImage = images.indices.contains(currentIndex) ? images[currentIndex] : nil
+        let image = images.indices.contains(currentIndex) ? images[currentIndex] : nil
+        viewModel.currentImage = image
         viewModel.displayIndex = currentIndex + 1
+        viewModel.currentMetadata = nil
+        guard let image, let source = metadataSource else { return }
+        Task.detached(priority: .utility) { [weak source] in
+            let meta = source?.inspectorMetadata(for: image)
+            await MainActor.run { [weak self] in self?.viewModel.currentMetadata = meta }
+        }
     }
 
     // MARK: - NSWindowDelegate

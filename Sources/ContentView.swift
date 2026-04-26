@@ -2351,7 +2351,8 @@ private func isCollapsedActiveNode(_ node: SidebarNode) -> Bool {
         guard !displayImages.isEmpty else { return }
         previewController.dismiss()
         let images = displayImages
-        let idx = startImage.flatMap { img in images.firstIndex { $0.id == img.id } } ?? 0
+        let anchor = startImage ?? displayedSelectedImage
+        let idx = anchor.flatMap { img in images.firstIndex { $0.id == img.id } } ?? 0
         SlideshowWindowController.shared.present(
             images: images,
             startIndex: idx,
