@@ -85,11 +85,18 @@ struct SmartFilter: Identifiable, Codable, Hashable {
     var id: UUID
     var name: String
     var query: String
+    var scopeFolderPath: String?  // nil = global; stored as path string for Codable
 
-    init(id: UUID = UUID(), name: String, query: String) {
+    var scopeFolderURL: URL? {
+        get { scopeFolderPath.map { URL(fileURLWithPath: $0) } }
+        set { scopeFolderPath = newValue?.path }
+    }
+
+    init(id: UUID = UUID(), name: String, query: String, scopeFolderURL: URL? = nil) {
         self.id = id
         self.name = name
         self.query = query
+        self.scopeFolderPath = scopeFolderURL?.path
     }
 }
 

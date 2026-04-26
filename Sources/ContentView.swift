@@ -309,7 +309,8 @@ struct ContentView: View {
                     .padding(.horizontal, 8)
                     .padding(.vertical, 6)
                 } else if let category {
-                    categoryRow(category, title: filter.name, systemImage: "line.3.horizontal.decrease.circle")
+                    let filterTitle = filter.scopeFolderURL.map { "\(filter.name) [\($0.lastPathComponent)]" } ?? filter.name
+                    categoryRow(category, title: filterTitle, systemImage: "line.3.horizontal.decrease.circle")
                         .contextMenu {
                             Button("Rename…") {
                                 smartFilterRenameDraft = filter.name
@@ -322,10 +323,11 @@ struct ContentView: View {
                         }
                 } else {
                     // Results not yet resolved — show a spinner row
+                    let filterTitle = filter.scopeFolderURL.map { "\(filter.name) [\($0.lastPathComponent)]" } ?? filter.name
                     HStack(spacing: 8) {
                         Image(systemName: "line.3.horizontal.decrease.circle")
                             .foregroundStyle(.secondary)
-                        Text(filter.name)
+                        Text(filterTitle)
                             .foregroundStyle(.secondary)
                         Spacer()
                         ProgressView().scaleEffect(0.6)
@@ -1027,10 +1029,11 @@ struct ContentView: View {
     }
 
     private var saveSearchButton: some View {
-        let alreadySaved = library.smartFilters.contains { $0.query == activeSearchText }
+        let scope = searchScopeCurrentRootOnly ? activeScopeFolderURL : nil
+        let alreadySaved = library.smartFilters.contains { $0.query == activeSearchText && $0.scopeFolderURL == scope }
         return Button {
             guard !alreadySaved else { return }
-            library.addSmartFilter(name: activeSearchText, query: activeSearchText)
+            library.addSmartFilter(name: activeSearchText, query: activeSearchText, scopeFolderURL: scope)
         } label: {
             Label("Save Search", systemImage: alreadySaved ? "bookmark.fill" : "bookmark")
                 .labelStyle(.iconOnly)

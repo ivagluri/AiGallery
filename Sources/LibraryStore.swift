@@ -750,8 +750,8 @@ final class LibraryStore: ObservableObject {
 
     // MARK: - Smart Filters
 
-    func addSmartFilter(name: String, query: String) {
-        let filter = SmartFilter(name: name, query: query)
+    func addSmartFilter(name: String, query: String, scopeFolderURL: URL? = nil) {
+        let filter = SmartFilter(name: name, query: query, scopeFolderURL: scopeFolderURL)
         smartFilters.append(filter)
         persistSmartFilters()
         smartFilterTask?.cancel()
@@ -807,7 +807,7 @@ final class LibraryStore: ObservableObject {
         guard !filters.isEmpty else { return }
         var newResults: [UUID: [ImageItem]] = [:]
         for filter in filters {
-            let result = await searchWithMetadata(matching: filter.query, limit: 10_000)
+            let result = await searchWithMetadata(matching: filter.query, limit: 10_000, limitToFolder: filter.scopeFolderURL)
             newResults[filter.id] = result.images
         }
         let resolvedResults = newResults
