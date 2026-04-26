@@ -53,6 +53,13 @@ struct AiGalleryApp: App {
                     library.addRootFolder()
                 }
                 .keyboardShortcut("o")
+
+                Divider()
+
+                Button("Start Slideshow") {
+                    SlideshowCoordinator.shared.requestLaunch()
+                }
+                .keyboardShortcut("s", modifiers: [.command, .shift])
             }
 
             CommandMenu("Sort") {
@@ -72,6 +79,10 @@ struct AiGalleryApp: App {
                     }
                 }
             }
+        }
+
+        Settings {
+            PreferencesView()
         }
     }
 }

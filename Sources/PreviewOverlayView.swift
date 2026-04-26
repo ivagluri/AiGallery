@@ -71,7 +71,9 @@ struct PreviewOverlayView: View {
 
     @ViewBuilder
     private func previewControls(metrics: PreviewDynamicMetrics) -> some View {
-        let showsControls = session.capabilities.supportsNavigation || session.capabilities.supportsFavorite
+        let showsControls = session.capabilities.supportsNavigation
+            || session.capabilities.supportsFavorite
+            || session.capabilities.supportsSlideshow
 
         if showsControls {
             HStack(spacing: metrics.controlButtonSpacing) {
@@ -102,6 +104,20 @@ struct PreviewOverlayView: View {
                         isEnabled: session.canNavigateNext
                     ) {
                         session.onNavigate?(.next)
+                    }
+                }
+
+                if session.capabilities.supportsSlideshow {
+                    Rectangle()
+                        .fill(buttonBorderColor.opacity(0.5))
+                        .frame(width: 1, height: metrics.controlButtonDiameter * 0.6)
+                        .padding(.horizontal, 2)
+
+                    overlayButton(
+                        systemImage: "play.circle",
+                        metrics: metrics
+                    ) {
+                        session.onStartSlideshow?()
                     }
                 }
             }

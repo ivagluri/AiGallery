@@ -47,6 +47,7 @@ struct ContentView: View {
     @State private var diffAnchorImage: ImageItem?
     @State private var multiSelectedImageIDs: Set<ImageItem.ID> = []
     @AppStorage("suppressMultiDeleteConfirm") private var suppressMultiDeleteConfirm = false
+    @StateObject private var slideshowCoordinator = SlideshowCoordinator.shared
 
     var body: some View {
         NavigationSplitView {
@@ -122,6 +123,11 @@ struct ContentView: View {
         }
         .onChange(of: displayedSelectedImage?.id) { _ in
             syncPreviewSession()
+        }
+        .onChange(of: slideshowCoordinator.launchRequested) { requested in
+            guard requested else { return }
+            slideshowCoordinator.launchRequested = false
+            launchSlideshow()
         }
         .background(
             HostWindowReader { window in
@@ -1017,6 +1023,7 @@ struct ContentView: View {
                 Spacer(minLength: 12)
 
                 previewButton
+                slideshowButton
                 kinButton
                 filterBarToggleButton
                 sortButton
@@ -1032,6 +1039,7 @@ struct ContentView: View {
 
                 HStack(spacing: 16) {
                     previewButton
+                    slideshowButton
                     kinButton
                     filterBarToggleButton
                     sortButton
@@ -1048,6 +1056,7 @@ struct ContentView: View {
                 }
 
                 previewButton
+                slideshowButton
                 kinButton
                 filterBarToggleButton
                 sortButton
@@ -1217,6 +1226,9 @@ struct ContentView: View {
                                 onOpenPreview: {
                                     openPreview(for: image)
                                 },
+                                onStartSlideshow: {
+                                    launchSlideshow(startingAt: image)
+                                },
                                 onToggleFavorite: {
                                     library.toggleFavorite(image)
                                 },
@@ -1353,6 +1365,16 @@ struct ContentView: View {
         .foregroundStyle(isKinActive ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(Color.primary))
     }
 
+    private var slideshowButton: some View {
+        Button {
+            launchSlideshow()
+        } label: {
+            toolbarIconLabel("Slideshow", systemImage: "play.circle")
+        }
+        .help("Start Slideshow")
+        .disabled(displayImages.isEmpty)
+    }
+
     private func toolbarIconLabel(_ title: String, systemImage: String) -> some View {
         Label(title, systemImage: systemImage)
             .labelStyle(.iconOnly)
@@ -1467,6 +1489,7 @@ struct ContentView: View {
             suspendThumbnailLoading: false,
             onSelect: { selectKinMatch(match.image) },
             onOpenPreview: { openPreview(for: match.image) },
+            onStartSlideshow: { launchSlideshow(startingAt: match.image) },
             onToggleFavorite: { library.toggleFavorite(match.image) },
             onTrash: { library.trashImage(match.image) }
         )
@@ -2324,6 +2347,19 @@ private func isCollapsedActiveNode(_ node: SidebarNode) -> Bool {
         presentPreview()
     }
 
+    func launchSlideshow(startingAt startImage: ImageItem? = nil) {
+        guard !displayImages.isEmpty else { return }
+        previewController.dismiss()
+        let images = displayImages
+        let idx = startImage.flatMap { img in images.firstIndex { $0.id == img.id } } ?? 0
+        SlideshowWindowController.shared.present(
+            images: images,
+            startIndex: idx,
+            settings: SlideshowSettings.shared.snapshot(),
+            metadataSource: library
+        )
+    }
+
     private func presentPreview() {
         guard displayedSelectedImage != nil else {
             return
@@ -2361,7 +2397,8 @@ private func isCollapsedActiveNode(_ node: SidebarNode) -> Bool {
             capabilities: PreviewOverlayCapabilities(
                 supportsNavigation: !isDroppedInspection,
                 supportsFavorite: !isDroppedInspection,
-                supportsMetadata: false
+                supportsMetadata: false,
+                supportsSlideshow: !isDroppedInspection
             ),
             isFavorite: !isDroppedInspection && (displayedSelectedImage.map { library.isFavorite($0) } ?? false),
             canNavigatePrevious: hasPrevious,
@@ -2373,6 +2410,9 @@ private func isCollapsedActiveNode(_ node: SidebarNode) -> Bool {
                 guard let image = displayedSelectedImage else { return }
                 library.toggleFavorite(image)
                 syncPreviewSession()
+            },
+            onStartSlideshow: isDroppedInspection ? nil : {
+                launchSlideshow(startingAt: displayedSelectedImage)
             }
         )
     }
@@ -2871,6 +2911,7 @@ private struct ThumbnailCell: View {
     let suspendThumbnailLoading: Bool
     let onSelect: () -> Void
     let onOpenPreview: () -> Void
+    let onStartSlideshow: () -> Void
     let onToggleFavorite: () -> Void
     let onTrash: () -> Void
 
@@ -2921,11 +2962,20 @@ private struct ThumbnailCell: View {
             onSelect()
         }
         .contextMenu {
-            Button {
-                onSelect()
-                onOpenPreview()
-            } label: {
-                Label("Open", systemImage: "photo")
+            Group {
+                Button {
+                    onSelect()
+                    onOpenPreview()
+                } label: {
+                    Label("Open", systemImage: "photo")
+                }
+
+                Button {
+                    onSelect()
+                    onStartSlideshow()
+                } label: {
+                    Label("Start Slideshow from Here", systemImage: "play.circle")
+                }
             }
 
             Divider()
