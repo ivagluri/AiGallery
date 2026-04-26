@@ -70,7 +70,21 @@ enum SlideshowOverlayPreset: String, CaseIterable {
         case .none: return "None"
         case .filename: return "Filename"
         case .basicInfo: return "Basic Info"
-        case .fullPrompt: return "Full Prompt"
+        case .fullPrompt: return "Prompt"
+        }
+    }
+}
+
+enum SlideshowPromptContent: String, CaseIterable {
+    case positive = "positive"
+    case negative = "negative"
+    case both = "both"
+
+    var label: String {
+        switch self {
+        case .positive: return "Positive"
+        case .negative: return "Negative"
+        case .both: return "Both"
         }
     }
 }
@@ -121,6 +135,7 @@ final class SlideshowSettings: ObservableObject {
     @AppStorage("slideshow.overlayEnabled") var overlayEnabled: Bool = true
     @AppStorage("slideshow.overlayPreset") var overlayPresetRaw: String = SlideshowOverlayPreset.filename.rawValue
     @AppStorage("slideshow.overlayPosition") var overlayPositionRaw: String = SlideshowOverlayPosition.bottomCenter.rawValue
+    @AppStorage("slideshow.promptContent") var promptContentRaw: String = SlideshowPromptContent.positive.rawValue
 
     private init() {}
 
@@ -154,6 +169,11 @@ final class SlideshowSettings: ObservableObject {
         set { overlayPositionRaw = newValue.rawValue }
     }
 
+    var promptContent: SlideshowPromptContent {
+        get { SlideshowPromptContent(rawValue: promptContentRaw) ?? .positive }
+        set { promptContentRaw = newValue.rawValue }
+    }
+
     var nsBackgroundColor: NSColor {
         switch backgroundColorPreset {
         case .black: return .black
@@ -173,7 +193,8 @@ final class SlideshowSettings: ObservableObject {
             transition: transition,
             overlayEnabled: overlayEnabled,
             overlayPreset: overlayPreset,
-            overlayPosition: overlayPosition
+            overlayPosition: overlayPosition,
+            promptContent: promptContent
         )
     }
 }
@@ -190,6 +211,7 @@ struct SlideshowSettingsSnapshot {
     let overlayEnabled: Bool
     let overlayPreset: SlideshowOverlayPreset
     let overlayPosition: SlideshowOverlayPosition
+    let promptContent: SlideshowPromptContent
 
     var swiftUIBackgroundColor: Color {
         Color(nsColor: nsBackgroundColor)

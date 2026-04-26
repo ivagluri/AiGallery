@@ -112,6 +112,18 @@ private struct SlideshowPreferencesTab: View {
             }
             .disabled(!settings.overlayEnabled)
 
+            if settings.overlayEnabled && settings.overlayPreset == .fullPrompt {
+                Picker("Prompt", selection: Binding(
+                    get: { settings.promptContent },
+                    set: { settings.promptContent = $0 }
+                )) {
+                    ForEach(SlideshowPromptContent.allCases, id: \.rawValue) { content in
+                        Text(content.label).tag(content)
+                    }
+                }
+                .pickerStyle(.segmented)
+            }
+
             Picker("Position", selection: Binding(
                 get: { settings.overlayPosition },
                 set: { settings.overlayPosition = $0 }

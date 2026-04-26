@@ -63,8 +63,12 @@ final class SlideshowWindowController: NSObject, NSWindowDelegate {
         self.hostingController = hosting
 
         let screen = NSScreen.main ?? NSScreen.screens.first!
+        let sf = screen.visibleFrame
+        let winW = min(1200, sf.width  * 0.75)
+        let winH = min(800,  sf.height * 0.75)
+        let startRect = CGRect(x: sf.midX - winW / 2, y: sf.midY - winH / 2, width: winW, height: winH)
         let win = NSWindow(
-            contentRect: screen.frame,
+            contentRect: startRect,
             // .resizable is required for toggleFullScreen to succeed
             styleMask: [.titled, .closable, .resizable, .fullSizeContentView],
             backing: .buffered,
@@ -144,6 +148,7 @@ final class SlideshowWindowController: NSObject, NSWindowDelegate {
     // MARK: - Timer
 
     private func scheduleTimer() {
+        stopTimer()
         guard !viewModel.isPaused, viewModel.settings.duration > 0 else { return }
         timer = Timer.scheduledTimer(withTimeInterval: viewModel.settings.duration, repeats: false) { [weak self] _ in
             guard let self else { return }

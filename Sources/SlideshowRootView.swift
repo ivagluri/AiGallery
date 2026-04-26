@@ -27,6 +27,7 @@ struct SlideshowRootView: View {
                let image = viewModel.currentImage {
                 SlideshowOverlayView(
                     preset: viewModel.settings.overlayPreset,
+                    promptContent: viewModel.settings.promptContent,
                     position: viewModel.settings.overlayPosition,
                     image: image,
                     metadata: viewModel.currentMetadata
@@ -253,6 +254,7 @@ fileprivate final class SlideshowKeyHandlerView: NSView {
 
 private struct SlideshowOverlayView: View {
     let preset: SlideshowOverlayPreset
+    let promptContent: SlideshowPromptContent
     let position: SlideshowOverlayPosition
     let image: ImageItem
     let metadata: ImageMetadata?
@@ -293,10 +295,19 @@ private struct SlideshowOverlayView: View {
             if let cfg = metadata?.param("CFG scale"), !cfg.isEmpty { parts.append("cfg \(cfg)") }
             return parts.joined(separator: " · ")
         case .fullPrompt:
-            let prompt = metadata?.prompt ?? ""
+            let pos = metadata?.prompt ?? ""
+            let neg = metadata?.negativePrompt ?? ""
             let model = metadata?.param("Model") ?? ""
             var sections: [String] = []
-            if !prompt.isEmpty { sections.append(prompt) }
+            switch promptContent {
+            case .positive:
+                if !pos.isEmpty { sections.append(pos) }
+            case .negative:
+                if !neg.isEmpty { sections.append("[\(neg)]") }
+            case .both:
+                if !pos.isEmpty { sections.append(pos) }
+                if !neg.isEmpty { sections.append("[\(neg)]") }
+            }
             let footer = [image.displayName, model].filter { !$0.isEmpty }.joined(separator: " · ")
             if !footer.isEmpty { sections.append(footer) }
             return sections.isEmpty ? image.displayName : sections.joined(separator: "\n\n")
