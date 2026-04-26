@@ -741,8 +741,9 @@ final class LibraryStore: ObservableObject {
                 acc.formUnion(await index.imagePaths(matching: filters))
             }
             guard !Task.isCancelled else { return }
+            let finalPaths = acc
             await MainActor.run { [weak self] in
-                self?.filteredImagePaths = acc
+                self?.filteredImagePaths = finalPaths
             }
         }
     }
