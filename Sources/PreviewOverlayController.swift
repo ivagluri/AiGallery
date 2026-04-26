@@ -5,6 +5,7 @@ struct PreviewOverlayCapabilities {
     var supportsNavigation = false
     var supportsFavorite = false
     var supportsMetadata = false
+    var supportsSlideshow = false
 }
 
 struct PreviewOverlaySession {
@@ -15,6 +16,7 @@ struct PreviewOverlaySession {
     var canNavigateNext = false
     var onNavigate: ((PreviewOverlayNavigationAction) -> Void)?
     var onToggleFavorite: (() -> Void)?
+    var onStartSlideshow: (() -> Void)?
 }
 
 enum PreviewOverlayNavigationAction {
