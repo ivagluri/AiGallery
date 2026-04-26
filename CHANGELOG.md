@@ -1,9 +1,15 @@
 # Changelog
 
-### 25/4/26 Midstream updates--
-- Adjusted click area and added button padding to infobar control strip, much more reliable and forgiving to click
+## v2.2
+
+- **Slideshow mode** — press ⌘⇧S, use the toolbar play button, right-click a thumbnail, or tap the play button in the image viewer to launch a full-screen slideshow. Respects the current gallery view including search, filters, and smart filters. Space to pause/resume, arrow keys to step manually, Esc to exit.
+- **Preferences window** — ⌘, opens a new system-standard preferences window. Slideshow tab covers all playback and display settings; structured for future tabs.
+- **Slideshow settings** — configurable slide duration, playback order (in order or random), loop toggle, cross-fade transition, four image fit modes (fit, fill, actual size, stretch), and background colour presets with a custom colour picker.
+- **Slideshow text overlay** — optionally show image info during playback: filename only, basic generation info (name · model · steps · cfg), or full positive prompt with a footer line. Five overlay positions.
+- **Search scope toggle** — ⌘⌥L limits search results to the currently selected root folder. Toggle off to search across all roots as before.
 - **Multi-select** — Cmd+click to toggle individual images, Shift+click or Shift+arrow to extend a range, Cmd+A to select all. Group delete (Backspace or right-click) shows a confirmation sheet with a "don't ask again" option. The inspector always shows the last-clicked image; its delete button still acts on that single image only.
 - **Sort works in search** — the sort button now applies to search results, so you can sort a search by name or creation date the same way you would a browsed folder.
+- **Info strip usability** — wider click targets and added padding on infobar controls make the strip much more reliable to hit.
 
 ## v2.1.1
 
