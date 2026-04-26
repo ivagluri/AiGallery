@@ -1,14 +1,77 @@
+import AppKit
 import SwiftUI
 
 struct PreferencesView: View {
+    @ObservedObject var library: LibraryStore
+
     var body: some View {
         TabView {
             SlideshowPreferencesTab()
                 .tabItem {
                     Label("Slideshow", systemImage: "play.circle")
                 }
+            LibraryPreferencesTab(library: library)
+                .tabItem {
+                    Label("Library", systemImage: "externaldrive")
+                }
         }
         .frame(width: 520, height: 480)
+    }
+}
+
+// MARK: - Library Tab
+
+private struct LibraryPreferencesTab: View {
+    @ObservedObject var library: LibraryStore
+
+    private var isIndexing: Bool {
+        !library.indexProgressByRoot.isEmpty && library.indexProgress < 1.0
+    }
+
+    var body: some View {
+        Form {
+            Section("Metadata Index") {
+                Text("Reload (toolbar) only picks up new or modified files. Rebuild wipes the indexed metadata for every loaded folder and re-parses every image from scratch — use this when facet counts disagree with the file count, or after an app update that improves the metadata parser.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                HStack {
+                    Button("Rebuild Metadata Index", role: .destructive) {
+                        confirmRebuild()
+                    }
+                    .disabled(library.rootURLs.isEmpty || isIndexing)
+                    Spacer()
+                }
+
+                if isIndexing {
+                    VStack(alignment: .leading, spacing: 4) {
+                        ProgressView(value: library.indexProgress)
+                        Text("Indexing… \(Int(library.indexProgress * 100))%")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+        }
+        .formStyle(.grouped)
+        .padding(.vertical, 8)
+    }
+
+    private func confirmRebuild() {
+        let alert = NSAlert()
+        alert.messageText = "Rebuild Metadata Index?"
+        alert.informativeText = "This wipes the indexed metadata for every loaded folder and re-parses every image from scratch. The library remains usable while it runs."
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Rebuild")
+        alert.addButton(withTitle: "Cancel")
+        if let window = NSApp.keyWindow {
+            alert.beginSheetModal(for: window) { response in
+                if response == .alertFirstButtonReturn { library.rebuildMetadataIndex() }
+            }
+        } else if alert.runModal() == .alertFirstButtonReturn {
+            library.rebuildMetadataIndex()
+        }
     }
 }
 

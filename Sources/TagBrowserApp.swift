@@ -83,7 +83,7 @@ struct AiGalleryApp: App {
         }
 
         Settings {
-            PreferencesView()
+            PreferencesView(library: library)
         }
     }
 }

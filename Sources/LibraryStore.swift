@@ -243,6 +243,31 @@ final class LibraryStore: ObservableObject {
         }
     }
 
+    func rebuildMetadataIndex() {
+        let urls = rootURLs
+        guard !urls.isEmpty else { return }
+        Task { [weak self] in
+            guard let self else { return }
+            for url in urls {
+                let index = self.metadataIndexes[url]
+                await MainActor.run {
+                    self.indexScanTasksByRoot[url]?.cancel()
+                    self.indexScanTasksByRoot.removeValue(forKey: url)
+                    self.indexProgressByRoot[url] = 0
+                }
+                await index?.clearAll()
+            }
+            await MainActor.run {
+                self.pngInfoCache.removeAll()
+                self.folderMetadataCache.removeAll()
+                self.filteredImagePaths = []
+                for url in urls {
+                    self.startBackgroundIndexing(for: url)
+                }
+            }
+        }
+    }
+
     // MARK: - Lazy root loading
 
     func loadRoot(_ url: URL) {

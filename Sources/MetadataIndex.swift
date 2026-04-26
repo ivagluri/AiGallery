@@ -326,6 +326,11 @@ actor MetadataIndex {
         }
     }
 
+    func clearAll() {
+        guard let db else { return }
+        sqlite3_exec(db, "DELETE FROM indexed_images", nil, nil, nil)
+    }
+
     private func removePaths(_ paths: Set<String>) {
         guard let db else { return }
         var stmt: OpaquePointer?
