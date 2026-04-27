@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-04-26 — Midstream Updates
+
+- **Folder-scoped metadata filter bar** — the Model / Sampler / Scheduler / VAE / Upscaler dropdowns now show only the values present in the currently selected folder, not across every loaded root. Facet counts update automatically as you navigate the sidebar.
+- **In-place metadata filtering** — active metadata filters mask the current view directly rather than navigating to a synthetic "Filtered" category. Switching folders, clearing filters, or changing the selection no longer causes unexpected navigation side-effects.
+- **Rebuild Metadata Index** — new button in Settings → Library. Wipes every root's indexed rows and re-parses all images from scratch. Use this when facet counts disagree with the actual file count after a parser improvement or a failed first-index. Distinct from the toolbar Reload (which stays incremental).
+- **Preserve search scope when saving smart filters** — the "Search all roots / current root" toggle is now captured in saved smart filters and restored when they run.
+- **Slideshow timer fix and settings polish** — corrected an off-by-one in the slide-advance timer and tightened several preferences-window layout details.
+
 ## v2.2
 
 - **Slideshow mode** — press ⌘⇧S, use the toolbar play button, right-click a thumbnail, or tap the play button in the image viewer to launch a full-screen slideshow. Respects the current gallery view including search, filters, and smart filters. Space to pause/resume, arrow keys to step manually, Esc to exit.
