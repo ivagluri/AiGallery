@@ -121,6 +121,10 @@ struct ContentView: View {
                 Task { await loadFacetValues() }
             }
         }
+        .task(id: facetLoadID) {
+            guard showFilterBar else { return }
+            await loadFacetValues()
+        }
         .onChange(of: searchText) { newValue in
             handleSearchTextChange(newValue)
         }
@@ -173,9 +177,6 @@ struct ContentView: View {
         return Button {
             relinquishSearchFocus()
             showFilterBar.toggle()
-            if showFilterBar && facetValues.isEmpty {
-                Task { await loadFacetValues() }
-            }
         } label: {
             toolbarIconLabel(showFilterBar ? "Hide Filters" : "Show Filters", systemImage: icon)
         }
@@ -187,6 +188,15 @@ struct ContentView: View {
         guard let cat = library.categories.first(where: { $0.id == library.selectedCategoryID }),
               !cat.isSynthetic else { return nil }
         return cat.folderURL
+    }
+
+    private var effectiveFilterScopeURL: URL? {
+        activeScopeFolderURL
+    }
+
+    private var facetLoadID: String {
+        guard showFilterBar else { return "" }
+        return effectiveFilterScopeURL?.path ?? "global"
     }
 
     private var toolbarSearchField: some View {
@@ -617,7 +627,15 @@ struct ContentView: View {
                 VStack(spacing: 0) {
                     gridControls(for: category)
                     if showFilterBar { filterBar }
-                    imageGrid(images: displayImages)
+                    if displayImages.isEmpty && !library.activeMetadataFilters.isEmpty {
+                        PlaceholderView(
+                            title: "No Matches",
+                            systemImage: "line.3.horizontal.decrease.circle",
+                            description: "No images in this folder match the active filters."
+                        )
+                    } else {
+                        imageGrid(images: displayImages)
+                    }
                 }
             } else if let errorMessage = library.errorMessage {
                 PlaceholderView(
@@ -1223,10 +1241,13 @@ struct ContentView: View {
 
     private func loadFacetValues() async {
         guard library.hasAnyMetadataIndex else { return }
+        let scopeURL = effectiveFilterScopeURL
         var result: [MetadataField: [(value: String, count: Int)]] = [:]
         for field in MetadataField.allCases {
-            result[field] = await library.facetValues(for: field)
+            guard !Task.isCancelled else { return }
+            result[field] = await library.facetValues(for: field, scopedToFolder: scopeURL)
         }
+        guard !Task.isCancelled else { return }
         facetValues = result
     }
 
@@ -1789,7 +1810,9 @@ private func isCollapsedActiveNode(_ node: SidebarNode) -> Bool {
             return []
         }
 
-        return sortedImages(for: category)
+        let base = sortedImages(for: category)
+        guard !library.activeMetadataFilters.isEmpty else { return base }
+        return base.filter { library.filteredImagePaths.contains($0.id) }
     }
 
     private var displayedSelectedImage: ImageItem? {

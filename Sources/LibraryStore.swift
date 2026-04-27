@@ -31,7 +31,7 @@ final class LibraryStore: ObservableObject {
     private var filterTask: Task<Void, Never>?
     private var smartFilterTask: Task<Void, Never>?
     private var favoriteImageIDs: Set<String>
-    private var filteredImagePaths: Set<String> = []
+    @Published private(set) var filteredImagePaths: Set<String> = []
     private var smartFilterResults: [UUID: [ImageItem]] = [:]
 
     // MARK: - Derived
@@ -243,6 +243,31 @@ final class LibraryStore: ObservableObject {
         }
     }
 
+    func rebuildMetadataIndex() {
+        let urls = rootURLs
+        guard !urls.isEmpty else { return }
+        Task { [weak self] in
+            guard let self else { return }
+            for url in urls {
+                let index = self.metadataIndexes[url]
+                await MainActor.run {
+                    self.indexScanTasksByRoot[url]?.cancel()
+                    self.indexScanTasksByRoot.removeValue(forKey: url)
+                    self.indexProgressByRoot[url] = 0
+                }
+                await index?.clearAll()
+            }
+            await MainActor.run {
+                self.pngInfoCache.removeAll()
+                self.folderMetadataCache.removeAll()
+                self.filteredImagePaths = []
+                for url in urls {
+                    self.startBackgroundIndexing(for: url)
+                }
+            }
+        }
+    }
+
     // MARK: - Lazy root loading
 
     func loadRoot(_ url: URL) {
@@ -445,9 +470,6 @@ final class LibraryStore: ObservableObject {
         activeMetadataFilters = []
         filteredImagePaths = []
         filterTask?.cancel()
-        rebuildCategories()
-        selectedCategoryID = Self.validCategoryID(current: selectedCategoryID, categories: categories)
-        persistSelectedCategoryID(selectedCategoryID)
     }
 
     // MARK: - Metadata info
@@ -678,11 +700,23 @@ final class LibraryStore: ObservableObject {
         return termPaths
     }
 
-    func facetValues(for field: MetadataField) async -> [(value: String, count: Int)] {
+    func facetValues(for field: MetadataField, scopedToFolder folderURL: URL? = nil) async -> [(value: String, count: Int)] {
         var merged: [String: Int] = [:]
-        for index in metadataIndexes.values {
-            for (value, count) in await index.facetValues(for: field) {
-                merged[value, default: 0] += count
+        if let folder = folderURL {
+            let prefix = folder.path.hasSuffix("/") ? folder.path : folder.path + "/"
+            let root = rootURLs.first { folder.path.hasPrefix($0.path) }
+            let relevantIndexes: [MetadataIndex] = root.flatMap { metadataIndexes[$0] }.map { [$0] }
+                ?? Array(metadataIndexes.values)
+            for index in relevantIndexes {
+                for (value, count) in await index.facetValues(for: field, withinFolderPrefix: prefix) {
+                    merged[value, default: 0] += count
+                }
+            }
+        } else {
+            for index in metadataIndexes.values {
+                for (value, count) in await index.facetValues(for: field) {
+                    merged[value, default: 0] += count
+                }
             }
         }
         return merged.sorted { $0.value > $1.value }.map { (value: $0.key, count: $0.value) }
@@ -722,9 +756,6 @@ final class LibraryStore: ObservableObject {
         filterTask?.cancel()
         guard !activeMetadataFilters.isEmpty, !metadataIndexes.isEmpty else {
             filteredImagePaths = []
-            rebuildCategories()
-            selectedCategoryID = Self.validCategoryID(current: selectedCategoryID, categories: categories)
-            persistSelectedCategoryID(selectedCategoryID)
             return
         }
         let filters = activeMetadataFilters
@@ -737,13 +768,7 @@ final class LibraryStore: ObservableObject {
             guard !Task.isCancelled else { return }
             let finalPaths = acc
             await MainActor.run { [weak self] in
-                guard let self else { return }
-                self.filteredImagePaths = finalPaths
-                self.rebuildCategories()
-                self.selectedCategoryID = Self.validCategoryID(
-                    current: Self.filteredID, categories: self.categories
-                )
-                self.persistSelectedCategoryID(self.selectedCategoryID)
+                self?.filteredImagePaths = finalPaths
             }
         }
     }
@@ -878,19 +903,6 @@ final class LibraryStore: ObservableObject {
 
         var syntheticCategories: [Category] = []
         let placeholder = URL(fileURLWithPath: "/")
-
-        if !filteredImagePaths.isEmpty {
-            let filteredImages = allSourceImages
-                .filter { filteredImagePaths.contains($0.id) }
-                .sorted { $0.displayLabel.localizedCaseInsensitiveCompare($1.displayLabel) == .orderedAscending }
-            if !filteredImages.isEmpty {
-                syntheticCategories.append(Category(
-                    id: Self.filteredID, name: "Filtered", shortName: "Filtered",
-                    pathParts: ["Filtered"], rootGroupID: Self.filteredID, rootGroupName: "Filtered",
-                    folderURL: placeholder, images: filteredImages, isSynthetic: true, sourceRootURL: nil
-                ))
-            }
-        }
 
         if !favoriteImages.isEmpty {
             syntheticCategories.append(Category(
