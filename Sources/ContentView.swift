@@ -185,19 +185,6 @@ struct ContentView: View {
         .foregroundStyle(hasActive ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(Color.primary))
     }
 
-    private var squareCropToggleButton: some View {
-        Button {
-            squareCropThumbnails.toggle()
-        } label: {
-            toolbarIconLabel(
-                squareCropThumbnails ? "Natural Thumbnails" : "Square Thumbnails",
-                systemImage: squareCropThumbnails ? "square.fill" : "rectangle.and.arrow.up.right.and.arrow.down.left"
-            )
-        }
-        .help(squareCropThumbnails ? "Switch to natural aspect ratio" : "Switch to square crop")
-        .foregroundStyle(squareCropThumbnails ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(Color.primary))
-    }
-
     private var activeScopeFolderURL: URL? {
         guard let cat = library.categories.first(where: { $0.id == library.selectedCategoryID }),
               !cat.isSynthetic else { return nil }
@@ -679,6 +666,12 @@ struct ContentView: View {
             kinMatches = await library.kinMatches(for: image)
             isKinLoading = false
         }
+        .overlay(alignment: .bottom) {
+            if isKinActive || isSearching || library.selectedCategory != nil {
+                viewportBottomBar
+                    .padding(.bottom, 16)
+            }
+        }
     }
 
     private var inspector: some View {
@@ -1086,9 +1079,7 @@ struct ContentView: View {
                 slideshowButton
                 kinButton
                 filterBarToggleButton
-                squareCropToggleButton
                 sortButton
-                thumbnailSizeControl
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -1103,10 +1094,7 @@ struct ContentView: View {
                     slideshowButton
                     kinButton
                     filterBarToggleButton
-                    squareCropToggleButton
                     sortButton
-                    Spacer(minLength: 8)
-                    thumbnailSizeControl
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -1121,10 +1109,7 @@ struct ContentView: View {
                 slideshowButton
                 kinButton
                 filterBarToggleButton
-                squareCropToggleButton
                 sortButton
-
-                thumbnailSizeControl
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
@@ -1397,9 +1382,24 @@ struct ContentView: View {
         .disabled(displayedSelectedImage == nil)
     }
 
-    private var thumbnailSizeControl: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "square.grid.2x2")
+    private var viewportBottomBar: some View {
+        HStack(spacing: 12) {
+            Button {
+                squareCropThumbnails.toggle()
+            } label: {
+                Image(systemName: squareCropThumbnails
+                    ? "square.fill"
+                    : "rectangle.and.arrow.up.right.and.arrow.down.left")
+                    .foregroundStyle(squareCropThumbnails ? Color.accentColor : Color.primary)
+                    .frame(width: 18, height: 18)
+            }
+            .buttonStyle(.plain)
+            .help(squareCropThumbnails ? "Switch to natural aspect ratio" : "Switch to square crop")
+
+            Divider()
+                .frame(height: 16)
+
+            Image(systemName: "square.grid.3x3.fill")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
@@ -1408,13 +1408,20 @@ struct ContentView: View {
                 in: 0...Double(Self.thumbnailSizes.count - 1),
                 step: 1
             )
-            .frame(width: 140)
+            .frame(width: 120)
 
-            Image(systemName: "square.grid.3x3.fill")
-                .font(.title3)
+            Image(systemName: "square.grid.2x2")
+                .font(.body)
                 .foregroundStyle(.secondary)
         }
-        .help("Adjust thumbnail size")
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .stroke(Color.primary.opacity(0.10), lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(0.15), radius: 10, y: 3)
     }
 
     private var kinButton: some View {
@@ -1525,7 +1532,6 @@ struct ContentView: View {
                 || displayedSelectedImage?.id == kinSourceImage?.id)
 
             previewButton
-            thumbnailSizeControl
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 16)
