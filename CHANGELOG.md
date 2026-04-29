@@ -6,9 +6,6 @@
 - **A1111 scheduler parsing** — newer A1111 images emit `Schedule type` as a separate parameter (e.g. `Align Your Steps`). The metadata index now captures this correctly; previously the scheduler column was left null for these images.
 - **Draw Things upscaler indexing** — the upscaler field was extracted by the inspector but not written to the metadata index, so the Upscaler filter bar dropdown was always empty for Draw Things images. Now indexed from both the JSON blob and the alt-text parameters.
 - **Fixed crash on Rebuild Metadata Index** — a data race between `facetValues` reading `metadataIndexes` off the main actor and the background scan writing to it on the main actor caused a crash when the filter bar was active during a rebuild. Fixed by isolating all `metadataIndexes` accesses to the main actor.
-
-## 2026-04-26 — Midstream Updates
-
 - **Folder-scoped metadata filter bar** — the Model / Sampler / Scheduler / VAE / Upscaler dropdowns now show only the values present in the currently selected folder, not across every loaded root. Facet counts update automatically as you navigate the sidebar.
 - **In-place metadata filtering** — active metadata filters mask the current view directly rather than navigating to a synthetic "Filtered" category. Switching folders, clearing filters, or changing the selection no longer causes unexpected navigation side-effects.
 - **Rebuild Metadata Index** — new button in Settings → Library. Wipes every root's indexed rows and re-parses all images from scratch. Use this when facet counts disagree with the actual file count after a parser improvement or a failed first-index. Distinct from the toolbar Reload (which stays incremental).
