@@ -381,9 +381,11 @@ actor MetadataIndex {
         let rawModel    = param("Model",           in: params)
         let rawSampler  = param("Sampler",         in: params)
         let rawScheduler = param("Scheduler",      in: params)
+                       ?? param("Schedule Type",  in: params)  // A1111 newer: "Schedule type: Align Your Steps"
         let rawVAE      = param("VAE",             in: params)
         let rawUpscaler = param("Hires upscaler",  in: params)
                        ?? param("Upscale Method",  in: params)
+                       ?? param("Upscaler",        in: params)  // Draw Things
 
         let model = rawModel.flatMap { normalizeModelName($0) }
 

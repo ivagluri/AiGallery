@@ -2452,6 +2452,8 @@ private func isCollapsedActiveNode(_ node: SidebarNode) -> Bool {
         let hasPrevious = !isDroppedInspection && (currentIndex ?? 0) > 0
         let hasNext = !isDroppedInspection && (currentIndex ?? -1) >= 0 && (currentIndex ?? -1) < images.count - 1
 
+        let sessionMetadata = displayedSelectedImage.flatMap { library.inspectorMetadata(for: $0) }
+
         return PreviewOverlaySession(
             image: displayedSelectedImage,
             capabilities: PreviewOverlayCapabilities(
@@ -2473,7 +2475,8 @@ private func isCollapsedActiveNode(_ node: SidebarNode) -> Bool {
             },
             onStartSlideshow: isDroppedInspection ? nil : {
                 launchSlideshow(startingAt: displayedSelectedImage)
-            }
+            },
+            metadata: sessionMetadata
         )
     }
 

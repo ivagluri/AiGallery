@@ -30,7 +30,7 @@ struct PreviewOverlayView: View {
         }
     }
 
-    private func previewSurface(in availableSize: CGSize) -> some View {
+    @MainActor private func previewSurface(in availableSize: CGSize) -> some View {
         let metrics = dynamicMetrics(for: availableSize)
         let layout = previewLayout(for: availableSize)
 
@@ -58,6 +58,19 @@ struct PreviewOverlayView: View {
             .overlay {
                 RoundedRectangle(cornerRadius: 28, style: .continuous)
                     .stroke(borderColor, lineWidth: 1)
+            }
+            .overlay {
+                if session.overlayPreset != .none, let image = session.image {
+                    SlideshowOverlayView(
+                        preset: session.overlayPreset,
+                        promptContent: SlideshowSettings.shared.promptContent,
+                        position: SlideshowSettings.shared.overlayPosition,
+                        image: image,
+                        metadata: session.metadata,
+                        bottomClearance: 20
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
+                }
             }
             .shadow(color: shadowColor, radius: 36, y: 12)
             .onTapGesture(count: 2) {

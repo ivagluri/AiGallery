@@ -17,6 +17,8 @@ struct PreviewOverlaySession {
     var onNavigate: ((PreviewOverlayNavigationAction) -> Void)?
     var onToggleFavorite: (() -> Void)?
     var onStartSlideshow: (() -> Void)?
+    var metadata: ImageMetadata?
+    var overlayPreset: SlideshowOverlayPreset = .none
 }
 
 enum PreviewOverlayNavigationAction {
@@ -40,6 +42,10 @@ final class PreviewOverlayController: NSObject, ObservableObject, NSWindowDelega
     private var keyMonitor: Any?
     private var notificationObservers: [NSObjectProtocol] = []
     private var activeSession: PreviewOverlaySession?
+    private var currentOverlayPreset: SlideshowOverlayPreset = {
+        let raw = UserDefaults.standard.string(forKey: "previewOverlayPreset") ?? ""
+        return SlideshowOverlayPreset(rawValue: raw) ?? .none
+    }()
 
     func present(session: PreviewOverlaySession, from sourceWindow: NSWindow?) {
         guard session.image != nil, let sourceWindow else {
@@ -81,9 +87,13 @@ final class PreviewOverlayController: NSObject, ObservableObject, NSWindowDelega
             return
         }
 
-        hostingController?.rootView = PreviewOverlayView(session: session) { [weak self] in
-            self?.dismiss()
-        }
+        hostingController?.rootView = makeView(for: session)
+    }
+
+    private func makeView(for session: PreviewOverlaySession) -> PreviewOverlayView {
+        var s = session
+        s.overlayPreset = currentOverlayPreset
+        return PreviewOverlayView(session: s) { [weak self] in self?.dismiss() }
     }
 
     private func show(session: PreviewOverlaySession, from sourceWindow: NSWindow) {
@@ -100,9 +110,7 @@ final class PreviewOverlayController: NSObject, ObservableObject, NSWindowDelega
         let panel = PreviewOverlayPanel(frame: targetFrame(for: sourceWindow))
         panel.delegate = self
 
-        let rootView = PreviewOverlayView(session: session) { [weak self] in
-            self?.dismiss()
-        }
+        let rootView = makeView(for: session)
         let hostingController = NSHostingController(rootView: rootView)
         hostingController.view.wantsLayer = true
         hostingController.view.layer?.backgroundColor = NSColor.clear.cgColor
@@ -225,6 +233,13 @@ final class PreviewOverlayController: NSObject, ObservableObject, NSWindowDelega
             case 3:
                 self.activeSession?.onToggleFavorite?()
                 return nil
+            case 35: // p — cycle info overlay
+                self.currentOverlayPreset = self.currentOverlayPreset.nextViewerPreset
+                UserDefaults.standard.set(self.currentOverlayPreset.rawValue, forKey: "previewOverlayPreset")
+                if let session = self.activeSession {
+                    self.hostingController?.rootView = self.makeView(for: session)
+                }
+                return nil
             default:
                 return nil
             }
@@ -274,5 +289,16 @@ private final class PreviewOverlayPanel: NSPanel {
         isOpaque = false
         collectionBehavior = [.transient, .ignoresCycle]
         animationBehavior = .utilityWindow
+    }
+}
+
+private extension SlideshowOverlayPreset {
+    var nextViewerPreset: SlideshowOverlayPreset {
+        switch self {
+        case .none:       return .filename
+        case .filename:   return .basicInfo
+        case .basicInfo:  return .fullPrompt
+        case .fullPrompt: return .none
+        }
     }
 }

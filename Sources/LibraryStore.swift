@@ -249,7 +249,7 @@ final class LibraryStore: ObservableObject {
         Task { [weak self] in
             guard let self else { return }
             for url in urls {
-                let index = self.metadataIndexes[url]
+                let index = await MainActor.run { self.metadataIndexes[url] }
                 await MainActor.run {
                     self.indexScanTasksByRoot[url]?.cancel()
                     self.indexScanTasksByRoot.removeValue(forKey: url)
@@ -700,7 +700,7 @@ final class LibraryStore: ObservableObject {
         return termPaths
     }
 
-    func facetValues(for field: MetadataField, scopedToFolder folderURL: URL? = nil) async -> [(value: String, count: Int)] {
+    @MainActor func facetValues(for field: MetadataField, scopedToFolder folderURL: URL? = nil) async -> [(value: String, count: Int)] {
         var merged: [String: Int] = [:]
         if let folder = folderURL {
             let prefix = folder.path.hasSuffix("/") ? folder.path : folder.path + "/"

@@ -657,6 +657,7 @@ enum PNGInfoReader {
         appendParameter(named: "Strength", fromKeys: ["strength"], in: dictionary, into: &parameters)
         appendParameter(named: "Clip Skip", fromKeys: ["clip_skip", "clipSkip"], in: dictionary, into: &parameters)
         appendParameter(named: "Aesthetic Score", fromKeys: ["aesthetic_score", "aestheticScore"], in: dictionary, into: &parameters)
+        appendParameter(named: "Upscaler", fromKeys: ["upscaler"], in: dictionary, into: &parameters)
         appendParameter(named: "Negative Aesthetic Score", fromKeys: ["negative_aesthetic_score", "negativeAestheticScore"], in: dictionary, into: &parameters)
         appendParameter(named: "Original Size", fromKeys: ["original_size", "originalSize"], in: dictionary, into: &parameters)
         appendParameter(named: "Target Size", fromKeys: ["target_size", "targetSize"], in: dictionary, into: &parameters)

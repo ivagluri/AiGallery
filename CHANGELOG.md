@@ -1,5 +1,12 @@
 # Changelog
 
+## v2.2.1
+
+- **Image viewer info overlay** — press `p` while the image viewer is open to cycle through overlay modes: none → filename → basic info → full prompt. Reuses the slideshow overlay component, respects the slideshow position setting, and persists the last-used mode between sessions.
+- **A1111 scheduler parsing** — newer A1111 images emit `Schedule type` as a separate parameter (e.g. `Align Your Steps`). The metadata index now captures this correctly; previously the scheduler column was left null for these images.
+- **Draw Things upscaler indexing** — the upscaler field was extracted by the inspector but not written to the metadata index, so the Upscaler filter bar dropdown was always empty for Draw Things images. Now indexed from both the JSON blob and the alt-text parameters.
+- **Fixed crash on Rebuild Metadata Index** — a data race between `facetValues` reading `metadataIndexes` off the main actor and the background scan writing to it on the main actor caused a crash when the filter bar was active during a rebuild. Fixed by isolating all `metadataIndexes` accesses to the main actor.
+
 ## 2026-04-26 — Midstream Updates
 
 - **Folder-scoped metadata filter bar** — the Model / Sampler / Scheduler / VAE / Upscaler dropdowns now show only the values present in the currently selected folder, not across every loaded root. Facet counts update automatically as you navigate the sidebar.

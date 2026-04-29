@@ -252,12 +252,13 @@ fileprivate final class SlideshowKeyHandlerView: NSView {
 
 // MARK: - Text Overlay
 
-private struct SlideshowOverlayView: View {
+struct SlideshowOverlayView: View {
     let preset: SlideshowOverlayPreset
     let promptContent: SlideshowPromptContent
     let position: SlideshowOverlayPosition
     let image: ImageItem
     let metadata: ImageMetadata?
+    var bottomClearance: CGFloat = 96
 
     var body: some View {
         ZStack(alignment: position.alignment) {
@@ -317,7 +318,7 @@ private struct SlideshowOverlayView: View {
     private func edgePadding(for pos: SlideshowOverlayPosition) -> EdgeInsets {
         let side: CGFloat = 20
         let top: CGFloat = 20
-        let bottom: CGFloat = 96 // clear the HUD capsule
+        let bottom: CGFloat = bottomClearance
         switch pos {
         case .topLeft:    return EdgeInsets(top: top,    leading: side, bottom: 0,      trailing: 0)
         case .topRight:   return EdgeInsets(top: top,    leading: 0,    bottom: 0,      trailing: side)
@@ -338,7 +339,7 @@ private struct SlideshowOverlayView: View {
 
 // MARK: - Metadata helper
 
-private extension ImageMetadata {
+extension ImageMetadata {
     func param(_ keyword: String) -> String? {
         generationParameters.first { $0.keyword.caseInsensitiveCompare(keyword) == .orderedSame }?.value
     }
