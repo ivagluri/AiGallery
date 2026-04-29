@@ -9,6 +9,7 @@ struct ContentView: View {
     @AppStorage("imageSortOrder") private var imageSortOrderRawValue = ImageSortOrder.alphabeticalAscending.rawValue
     @AppStorage("imageSortToggleMode") private var imageSortToggleModeRawValue = ImageSortToggleMode.cycleAll.rawValue
     @AppStorage("thumbnailSizeIndex") private var thumbnailSizeIndex = 2
+    @AppStorage("squareCropThumbnails") private var squareCropThumbnails = false
     @AppStorage("inspectorPanelWidth") private var inspectorPanelWidth = 360.0
     @FocusState private var isSearchFieldFocused: Bool
     @State private var searchText = ""
@@ -182,6 +183,19 @@ struct ContentView: View {
         }
         .help(showFilterBar ? "Hide Filter Bar" : "Show Filter Bar")
         .foregroundStyle(hasActive ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(Color.primary))
+    }
+
+    private var squareCropToggleButton: some View {
+        Button {
+            squareCropThumbnails.toggle()
+        } label: {
+            toolbarIconLabel(
+                squareCropThumbnails ? "Natural Thumbnails" : "Square Thumbnails",
+                systemImage: squareCropThumbnails ? "square.fill" : "rectangle.and.arrow.up.right.and.arrow.down.left"
+            )
+        }
+        .help(squareCropThumbnails ? "Switch to natural aspect ratio" : "Switch to square crop")
+        .foregroundStyle(squareCropThumbnails ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(Color.primary))
     }
 
     private var activeScopeFolderURL: URL? {
@@ -1072,6 +1086,7 @@ struct ContentView: View {
                 slideshowButton
                 kinButton
                 filterBarToggleButton
+                squareCropToggleButton
                 sortButton
                 thumbnailSizeControl
             }
@@ -1088,6 +1103,7 @@ struct ContentView: View {
                     slideshowButton
                     kinButton
                     filterBarToggleButton
+                    squareCropToggleButton
                     sortButton
                     Spacer(minLength: 8)
                     thumbnailSizeControl
@@ -1105,6 +1121,7 @@ struct ContentView: View {
                 slideshowButton
                 kinButton
                 filterBarToggleButton
+                squareCropToggleButton
                 sortButton
 
                 thumbnailSizeControl
@@ -1267,6 +1284,7 @@ struct ContentView: View {
                                 isSelected: image.id == selectedImageID,
                                 isMultiSelected: multiSelectedImageIDs.contains(image.id),
                                 thumbnailHeight: thumbnailSize,
+                                squareCrop: squareCropThumbnails,
                                 isFavorite: library.isFavorite(image),
                                 suspendThumbnailLoading: isInspectorResizing,
                                 onSelect: {
@@ -1534,6 +1552,7 @@ struct ContentView: View {
             isSelected: match.image.id == displayedSelectedImage?.id,
             isMultiSelected: false,
             thumbnailHeight: thumbnailSize,
+            squareCrop: squareCropThumbnails,
             isFavorite: library.isFavorite(match.image),
             suspendThumbnailLoading: false,
             onSelect: { selectKinMatch(match.image) },
@@ -2970,6 +2989,7 @@ private struct ThumbnailCell: View {
     let isSelected: Bool
     let isMultiSelected: Bool
     let thumbnailHeight: Double
+    let squareCrop: Bool
     let isFavorite: Bool
     let suspendThumbnailLoading: Bool
     let onSelect: () -> Void
@@ -2984,7 +3004,8 @@ private struct ThumbnailCell: View {
                 ThumbnailImage(
                     imageURL: image.fileURL,
                     maximumPixelDimension: max(Int((thumbnailHeight * 2.2).rounded()), 160),
-                    isSuspended: suspendThumbnailLoading
+                    isSuspended: suspendThumbnailLoading,
+                    squareCrop: squareCrop
                 )
                     .frame(height: thumbnailHeight)
                     .frame(maxWidth: .infinity)
@@ -3381,6 +3402,7 @@ private struct ThumbnailImage: View {
     let imageURL: URL
     let maximumPixelDimension: Int
     let isSuspended: Bool
+    let squareCrop: Bool
     @State private var loadResult: SafeImageLoader.LoadResult?
 
     var body: some View {
@@ -3390,7 +3412,7 @@ private struct ThumbnailImage: View {
                 Image(nsImage: nsImage)
                     .resizable()
                     .interpolation(.high)
-                    .scaledToFit()
+                    .aspectRatio(contentMode: squareCrop ? .fill : .fit)
             case .blocked:
                 PlaceholderView(title: "", systemImage: "shield")
             case .failed:
