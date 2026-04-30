@@ -1,7 +1,9 @@
 # Changelog
 
-## Midstream updates 29/4/2026
+## v2.2.2
 
+- **add hidden folders** -- now able to hide folders or individual images from the gallery and also hides from search results and smart filters.
+- **navbar optimization** -- the navigation bar rewritten to use a flat folder structure, so now single "leaf folder" categories load on click compared to old behaviour.
 - **crop thumbnail display** -- added a togggle in the gallery view to crop thumbnails to fill the square tile instead of displaying at their native aspect ratio.
 - **UI rearranging** -- moved zoom slidder and crop toggle to a separate bar anchored to gallery view bottom.
 

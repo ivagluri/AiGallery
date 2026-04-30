@@ -23,6 +23,7 @@ struct AiGalleryApp: App {
     @StateObject private var library = LibraryStore()
     @AppStorage("imageSortOrder") private var imageSortOrderRawValue = ImageSortOrder.alphabeticalAscending.rawValue
     @AppStorage("imageSortToggleMode") private var imageSortToggleModeRawValue = ImageSortToggleMode.cycleAll.rawValue
+    @AppStorage("showHiddenFolders") private var showHiddenFolders: Bool = false
 
     private var imageSortOrder: ImageSortOrder {
         get { ImageSortOrder(rawValue: imageSortOrderRawValue) ?? .alphabeticalAscending }
@@ -61,6 +62,12 @@ struct AiGalleryApp: App {
                     SlideshowCoordinator.shared.requestLaunch()
                 }
                 .keyboardShortcut("s", modifiers: [.command, .shift])
+            }
+
+            CommandMenu("View") {
+                Toggle(isOn: $showHiddenFolders) {
+                    Text("Show Hidden Folders")
+                }
             }
 
             CommandMenu("Sort") {

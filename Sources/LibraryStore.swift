@@ -34,6 +34,19 @@ final class LibraryStore: ObservableObject {
     @Published private(set) var filteredImagePaths: Set<String> = []
     private var smartFilterResults: [UUID: [ImageItem]] = [:]
 
+    // MARK: - Hidden folder filtering
+
+    private(set) var excludedFolderPaths: Set<String> = []
+    private(set) var excludedImagePaths: Set<String> = []
+
+    func updateExcludedPaths(folderPaths: Set<String>, imagePaths: Set<String>) {
+        guard folderPaths != excludedFolderPaths || imagePaths != excludedImagePaths else { return }
+        excludedFolderPaths = folderPaths
+        excludedImagePaths = imagePaths
+        smartFilterTask?.cancel()
+        smartFilterTask = Task { await resolveSmartFilters() }
+    }
+
     // MARK: - Derived
 
     var sourceCategories: [Category] { sourceCategoriesByRoot.values.flatMap { $0 } }
@@ -608,7 +621,7 @@ final class LibraryStore: ObservableObject {
     }
 
     func searchWithMetadata(matching query: String, limit: Int, limitToFolder: URL? = nil) async -> SearchResult {
-        let effectiveSearchIndex: [ImageItem]
+        var effectiveSearchIndex: [ImageItem]
         let effectiveMetaIndexes: [URL: MetadataIndex]
         let folderPathPrefix: String?
         if let folder = limitToFolder {
@@ -622,6 +635,15 @@ final class LibraryStore: ObservableObject {
             effectiveSearchIndex = searchIndex
             effectiveMetaIndexes = metadataIndexes
             folderPathPrefix = nil
+        }
+
+        if !excludedFolderPaths.isEmpty {
+            effectiveSearchIndex = effectiveSearchIndex.filter { item in
+                !excludedFolderPaths.contains(where: { item.fileURL.path.hasPrefix($0 + "/") })
+            }
+        }
+        if !excludedImagePaths.isEmpty {
+            effectiveSearchIndex = effectiveSearchIndex.filter { !excludedImagePaths.contains($0.id) }
         }
 
         let filenameResult = GeneralLibraryProfile().search(matching: query, in: effectiveSearchIndex, limit: limit)
@@ -668,6 +690,14 @@ final class LibraryStore: ObservableObject {
             .subtracting(metadataExcludedPaths)
         if let prefix = folderPathPrefix {
             newMetadataPaths = newMetadataPaths.filter { $0.hasPrefix(prefix) }
+        }
+        if !excludedFolderPaths.isEmpty {
+            newMetadataPaths = newMetadataPaths.filter { path in
+                !excludedFolderPaths.contains(where: { path.hasPrefix($0 + "/") })
+            }
+        }
+        if !excludedImagePaths.isEmpty {
+            newMetadataPaths = newMetadataPaths.filter { !excludedImagePaths.contains($0) }
         }
 
         // Resolve paths: use in-memory item if available, otherwise build lightweight item from path.

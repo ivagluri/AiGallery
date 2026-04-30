@@ -14,7 +14,9 @@ struct ContentView: View {
     @FocusState private var isSearchFieldFocused: Bool
     @State private var searchText = ""
     @State private var activeSearchText = ""
-    @State private var expandedGroupIDs: Set<String> = []
+    @State private var expandedGroupIDs: Set<String> = {
+        Set(UserDefaults.standard.stringArray(forKey: "expandedGroupIDs") ?? [])
+    }()
     @State private var isInfoExpanded = true
     @State private var isPositivePromptExpanded = true
     @State private var isNegativePromptExpanded = true
@@ -50,6 +52,14 @@ struct ContentView: View {
     @AppStorage("suppressMultiDeleteConfirm") private var suppressMultiDeleteConfirm = false
     @State private var searchScopeCurrentRootOnly = false
     @StateObject private var slideshowCoordinator = SlideshowCoordinator.shared
+    @AppStorage("showHiddenFolders") private var showHiddenFolders: Bool = false
+    @State private var hiddenNodeIDs: Set<String> = {
+        Set(UserDefaults.standard.stringArray(forKey: "hiddenNodeIDs") ?? [])
+    }()
+    @State private var hiddenImageIDs: Set<String> = {
+        Set(UserDefaults.standard.stringArray(forKey: "hiddenImageIDs") ?? [])
+    }()
+    @State private var pendingNavigationRootURL: URL?
 
     var body: some View {
         NavigationSplitView {
@@ -96,10 +106,24 @@ struct ContentView: View {
         }
         .onAppear {
             expandAllGroupsIfNeeded()
+            pushExcludedPaths()
         }
         .onChange(of: library.loadedRootURLs) { _ in
             expandAllGroupsIfNeeded()
+            pushExcludedPaths()
+            if let pendingURL = pendingNavigationRootURL,
+               library.loadedRootURLs.contains(pendingURL) {
+                let rootCategory = library.categoryGroups
+                    .first { $0.sourceRootURL?.standardizedFileURL == pendingURL.standardizedFileURL }?
+                    .categories
+                    .first { $0.folderURL.standardizedFileURL == $0.sourceRootURL?.standardizedFileURL }
+                if let rootCategory { library.selectCategory(rootCategory) }
+                pendingNavigationRootURL = nil
+            }
         }
+        .onChange(of: hiddenNodeIDs) { _ in pushExcludedPaths() }
+        .onChange(of: hiddenImageIDs) { _ in pushExcludedPaths() }
+        .onChange(of: showHiddenFolders) { _ in pushExcludedPaths() }
         .onChange(of: library.rootURLs) { _ in
             clearDroppedInspection()
             facetValues = [:]
@@ -270,7 +294,29 @@ struct ContentView: View {
                             sidebarGroupDividerOverlay(isVisible: index > 0)
                         }
                 } else {
-                    sidebarGroup(group, stripeIndex: index)
+                    sidebarGroupHeader(group, stripeIndex: index)
+
+                    if isGroupExpanded(group.id) {
+                        ForEach(flatVisibleNodes(sidebarNodes(for: group), level: 1), id: \.node.id) { item in
+                            sidebarNodeRow(item.node, level: item.level)
+                                .listRowInsets(EdgeInsets(top: 1, leading: 0, bottom: 1, trailing: 0))
+                                .listRowBackground(sidebarStripeFill(for: index))
+                                .listRowSeparator(.hidden)
+                                .contextMenu {
+                                    if hiddenNodeIDs.contains(item.node.id) {
+                                        Button("Unhide Folder") {
+                                            hiddenNodeIDs.remove(item.node.id)
+                                            UserDefaults.standard.set(Array(hiddenNodeIDs), forKey: "hiddenNodeIDs")
+                                        }
+                                    } else {
+                                        Button("Hide Folder") {
+                                            hiddenNodeIDs.insert(item.node.id)
+                                            UserDefaults.standard.set(Array(hiddenNodeIDs), forKey: "hiddenNodeIDs")
+                                        }
+                                    }
+                                }
+                        }
+                    }
                 }
             }
             smartFiltersSidebarSection
@@ -428,18 +474,17 @@ struct ContentView: View {
         return selected.folderURL.standardizedFileURL == selected.sourceRootURL?.standardizedFileURL
     }
 
-    private func sidebarGroup(_ group: CategoryGroup, stripeIndex: Int) -> some View {
+    private func sidebarGroupHeader(_ group: CategoryGroup, stripeIndex: Int) -> some View {
         let rootCategory = group.categories.first {
             $0.folderURL.standardizedFileURL == $0.sourceRootURL?.standardizedFileURL
         }
-        let nodes = sidebarNodes(for: group)
-        let hasChildren = !nodes.isEmpty
+        let hasChildren = !sidebarNodes(for: group).isEmpty
         let isLoadingRoot = group.sourceRootURL.map { library.loadingRootURLs.contains($0) } ?? false
         let isUnloaded = !group.isSynthetic && group.categories.isEmpty && !isLoadingRoot
             && (group.sourceRootURL.map { !library.loadedRootURLs.contains($0) } ?? false)
-        return VStack(alignment: .leading, spacing: 2) {
-            HStack(spacing: 0) {
-                // Chevron — expand/collapse only
+        return HStack(spacing: 0) {
+            // Chevron — only when there are children, still loading, or not yet loaded
+            if hasChildren || isLoadingRoot || isUnloaded {
                 Button {
                     guard !isLoadingRoot else { return }
                     toggleGroupExpansion(group.id)
@@ -462,41 +507,41 @@ struct ContentView: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-
-                // Title — navigate only
-                Button {
-                    if isUnloaded, let rootURL = group.sourceRootURL {
-                        if !isGroupExpanded(group.id) { toggleGroupExpansion(group.id) }
-                        library.loadRoot(rootURL)
-                    }
-                    if let rootCategory { library.selectCategory(rootCategory) }
-                } label: {
-                    HStack(spacing: 8) {
-                        Text(group.name)
-                            .font(.headline)
-                        Spacer()
-                        if !isLoadingRoot {
-                            Text("\(group.imageCount)")
-                                .foregroundStyle(.secondary)
-                        }
-                    }
+            } else {
+                Color.clear
+                    .frame(width: 12, height: 12)
+                    .padding(.horizontal, 8)
                     .padding(.vertical, 4)
-                    .padding(.trailing, 8)
-                    .contentShape(Rectangle())
-                    .background(
-                        RoundedRectangle(cornerRadius: 8)
-                            .fill(isGroupHeaderActive(group) ? Color.accentColor.opacity(0.14) : Color.clear)
-                    )
-                }
-                .buttonStyle(.plain)
-                .frame(maxWidth: .infinity, alignment: .leading)
             }
 
-            if hasChildren && isGroupExpanded(group.id) {
-                ForEach(nodes) { node in
-                    sidebarNodeRow(node, level: 1)
+            // Title — navigate only
+            Button {
+                if isUnloaded, let rootURL = group.sourceRootURL {
+                    if !isGroupExpanded(group.id) { toggleGroupExpansion(group.id) }
+                    library.loadRoot(rootURL)
+                    pendingNavigationRootURL = rootURL
                 }
+                if let rootCategory { library.selectCategory(rootCategory) }
+            } label: {
+                HStack(spacing: 8) {
+                    Text(group.name)
+                        .font(.headline)
+                    Spacer()
+                    if !isLoadingRoot {
+                        Text("\(group.imageCount)")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .padding(.vertical, 4)
+                .padding(.trailing, 8)
+                .contentShape(Rectangle())
+                .background(
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(isGroupHeaderActive(group) ? Color.accentColor.opacity(0.14) : Color.clear)
+                )
             }
+            .buttonStyle(.plain)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(.vertical, 2)
         .listRowInsets(EdgeInsets(top: 2, leading: 0, bottom: 2, trailing: 0))
@@ -513,45 +558,36 @@ struct ContentView: View {
         }
     }
 
-    private func sidebarNodeRow(_ node: SidebarNode, level: Int) -> AnyView {
-        AnyView(
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 4) {
-                    if node.hasChildren {
-                        Button {
-                            toggleGroupExpansion(node.id)
-                        } label: {
-                            Image(systemName: isGroupExpanded(node.id) ? "chevron.down" : "chevron.right")
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(.secondary)
-                                .frame(width: 12, height: 12)
-                        }
-                        .buttonStyle(.plain)
-                    } else {
-                        Color.clear
-                            .frame(width: 12, height: 12)
-                    }
-
-                    if let category = node.category {
-                        categoryRow(
-                            category,
-                            title: node.title,
-                            systemImage: nil,
-                            isActiveOverride: isCollapsedActiveNode(node)
-                        )
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    }
+    private func sidebarNodeRow(_ node: SidebarNode, level: Int) -> some View {
+        HStack(spacing: 4) {
+            if node.hasChildren {
+                Button {
+                    toggleGroupExpansion(node.id)
+                } label: {
+                    Image(systemName: isGroupExpanded(node.id) ? "chevron.down" : "chevron.right")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 12, height: 12)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.leading, CGFloat(level) * 14)
-
-                if node.hasChildren && isGroupExpanded(node.id) {
-                    ForEach(node.children) { child in
-                        sidebarNodeRow(child, level: level + 1)
-                    }
-                }
+                .buttonStyle(.plain)
+            } else {
+                Color.clear
+                    .frame(width: 12, height: 12)
             }
-        )
+
+            if let category = node.category {
+                categoryRow(
+                    category,
+                    title: node.title,
+                    systemImage: nil,
+                    isActiveOverride: isCollapsedActiveNode(node)
+                )
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.leading, CGFloat(level) * 14)
+        .opacity(hiddenNodeIDs.contains(node.id) ? 0.45 : 1.0)
     }
 
     private func categoryRow(
@@ -1272,6 +1308,7 @@ struct ContentView: View {
                                 squareCrop: squareCropThumbnails,
                                 isFavorite: library.isFavorite(image),
                                 suspendThumbnailLoading: isInspectorResizing,
+                                isHidden: hiddenImageIDs.contains(image.id),
                                 onSelect: {
                                     handleThumbnailTap(image)
                                 },
@@ -1283,6 +1320,9 @@ struct ContentView: View {
                                 },
                                 onToggleFavorite: {
                                     library.toggleFavorite(image)
+                                },
+                                onToggleHidden: {
+                                    toggleImageHidden(image)
                                 },
                                 onTrash: {
                                     handleThumbnailTrash(image)
@@ -1561,10 +1601,12 @@ struct ContentView: View {
             squareCrop: squareCropThumbnails,
             isFavorite: library.isFavorite(match.image),
             suspendThumbnailLoading: false,
+            isHidden: hiddenImageIDs.contains(match.image.id),
             onSelect: { selectKinMatch(match.image) },
             onOpenPreview: { openPreview(for: match.image) },
             onStartSlideshow: { launchSlideshow(startingAt: match.image) },
             onToggleFavorite: { library.toggleFavorite(match.image) },
+            onToggleHidden: { toggleImageHidden(match.image) },
             onTrash: { library.trashImage(match.image) }
         )
         .help(match.reasons.map(\.rawValue).joined(separator: " · "))
@@ -1705,6 +1747,18 @@ struct ContentView: View {
         return sortSidebarNodes(nodes)
     }
 
+    private func flatVisibleNodes(_ nodes: [SidebarNode], level: Int) -> [(node: SidebarNode, level: Int)] {
+        nodes.flatMap { node -> [(node: SidebarNode, level: Int)] in
+            let isHidden = hiddenNodeIDs.contains(node.id)
+            if isHidden && !showHiddenFolders { return [] }
+            var result: [(node: SidebarNode, level: Int)] = [(node, level)]
+            if !isHidden && node.hasChildren && isGroupExpanded(node.id) {
+                result += flatVisibleNodes(node.children, level: level + 1)
+            }
+            return result
+        }
+    }
+
     private func isGroupExpanded(_ groupID: String) -> Bool {
         expandedGroupIDs.contains(groupID)
     }
@@ -1723,12 +1777,40 @@ private func isCollapsedActiveNode(_ node: SidebarNode) -> Bool {
         return selectedCategory.pathParts.starts(with: nodeCategoryParts)
     }
 
+    private func pushExcludedPaths() {
+        if showHiddenFolders {
+            library.updateExcludedPaths(folderPaths: [], imagePaths: [])
+            return
+        }
+        var folderPaths = Set<String>()
+        for nodeID in hiddenNodeIDs {
+            guard let slash = nodeID.firstIndex(of: "/") else { continue }
+            let rootHash = String(nodeID[nodeID.startIndex..<slash])
+            let relativePath = String(nodeID[nodeID.index(after: slash)...])
+            guard let rootURL = library.categoryGroups
+                .first(where: { $0.id == rootHash })?.sourceRootURL else { continue }
+            folderPaths.insert(rootURL.appendingPathComponent(relativePath).standardizedFileURL.path)
+        }
+        library.updateExcludedPaths(folderPaths: folderPaths, imagePaths: hiddenImageIDs)
+    }
+
+    private func toggleImageHidden(_ image: ImageItem) {
+        if hiddenImageIDs.contains(image.id) {
+            hiddenImageIDs.remove(image.id)
+        } else {
+            hiddenImageIDs.insert(image.id)
+        }
+        UserDefaults.standard.set(Array(hiddenImageIDs), forKey: "hiddenImageIDs")
+        pushExcludedPaths()
+    }
+
     private func toggleGroupExpansion(_ groupID: String) {
         if expandedGroupIDs.contains(groupID) {
             expandedGroupIDs.remove(groupID)
         } else {
             expandedGroupIDs.insert(groupID)
         }
+        UserDefaults.standard.set(Array(expandedGroupIDs), forKey: "expandedGroupIDs")
     }
 
     private func expandAllGroupsIfNeeded() {
@@ -1739,6 +1821,7 @@ private func isCollapsedActiveNode(_ node: SidebarNode) -> Bool {
         if expandedGroupIDs.isEmpty || expandedGroupIDs.intersection(topLevelGroupIDs).isEmpty {
             expandedGroupIDs = expandableNodeIDs
         }
+        UserDefaults.standard.set(Array(expandedGroupIDs), forKey: "expandedGroupIDs")
     }
 
     private func allExpandableNodeIDs() -> [String] {
@@ -1827,17 +1910,16 @@ private func isCollapsedActiveNode(_ node: SidebarNode) -> Bool {
     }
 
     private var displayImages: [ImageItem] {
+        let images: [ImageItem]
         if isSearching {
-            return sortedImages(activeSearchResults.images)
+            images = sortedImages(activeSearchResults.images)
+        } else {
+            guard let category = library.selectedCategory else { return [] }
+            let base = sortedImages(for: category)
+            images = library.activeMetadataFilters.isEmpty ? base : base.filter { library.filteredImagePaths.contains($0.id) }
         }
-
-        guard let category = library.selectedCategory else {
-            return []
-        }
-
-        let base = sortedImages(for: category)
-        guard !library.activeMetadataFilters.isEmpty else { return base }
-        return base.filter { library.filteredImagePaths.contains($0.id) }
+        guard !showHiddenFolders && !hiddenImageIDs.isEmpty else { return images }
+        return images.filter { !hiddenImageIDs.contains($0.id) }
     }
 
     private var displayedSelectedImage: ImageItem? {
@@ -3000,10 +3082,12 @@ private struct ThumbnailCell: View {
     let squareCrop: Bool
     let isFavorite: Bool
     let suspendThumbnailLoading: Bool
+    let isHidden: Bool
     let onSelect: () -> Void
     let onOpenPreview: () -> Void
     let onStartSlideshow: () -> Void
     let onToggleFavorite: () -> Void
+    let onToggleHidden: () -> Void
     let onTrash: () -> Void
 
     private var cellWidth: CGFloat {
@@ -3106,22 +3190,32 @@ private struct ThumbnailCell: View {
 
             Divider()
 
-            Button {
-                onSelect()
-                if let nsImage = NSImage(contentsOf: image.fileURL) {
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.writeObjects([nsImage])
+            Group {
+                Button {
+                    onSelect()
+                    if let nsImage = NSImage(contentsOf: image.fileURL) {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.writeObjects([nsImage])
+                    }
+                } label: {
+                    Label("Copy Image", systemImage: "doc.on.doc")
                 }
-            } label: {
-                Label("Copy Image", systemImage: "doc.on.doc")
-            }
 
-            Button {
-                onSelect()
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(image.fileURL.path, forType: .string)
-            } label: {
-                Label("Copy File Path", systemImage: "doc.on.clipboard")
+                Button {
+                    onSelect()
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(image.fileURL.path, forType: .string)
+                } label: {
+                    Label("Copy File Path", systemImage: "doc.on.clipboard")
+                }
+
+                Divider()
+
+                Button {
+                    onToggleHidden()
+                } label: {
+                    Label(isHidden ? "Unhide Image" : "Hide Image", systemImage: isHidden ? "eye" : "eye.slash")
+                }
             }
 
             Divider()
