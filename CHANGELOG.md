@@ -1,5 +1,10 @@
 # Changelog
 
+## Midstream updates 29/4/2026
+
+- **crop thumbnail display** -- added a togggle in the gallery view to crop thumbnails to fill the square tile instead of displaying at their native aspect ratio.
+- **UI rearranging** -- moved zoom slidder and crop toggle to a separate bar anchored to gallery view bottom.
+
 ## v2.2.1
 
 - **Image viewer info overlay** — press `p` while the image viewer is open to cycle through overlay modes: none → filename → basic info → full prompt. Reuses the slideshow overlay component, respects the slideshow position setting, and persists the last-used mode between sessions.
