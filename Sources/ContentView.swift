@@ -2658,7 +2658,7 @@ private func isCollapsedActiveNode(_ node: SidebarNode) -> Bool {
 
     private static let maximumSearchResults = 300
     private static let minimumSearchLength = 2
-    private static let thumbnailSizes: [Double] = [100, 120, 150, 185, 225, 260, 300]
+    private static let thumbnailSizes: [Double] = [100, 125, 155, 195, 240, 300, 375]
 }
 
 private struct BrowseSelection {
@@ -2991,6 +2991,8 @@ private struct InspectorActionButtonStyle: ButtonStyle {
 
 private struct ThumbnailCell: View {
     @Environment(\.colorScheme) private var colorScheme
+    private let cardInset: CGFloat = 5.5
+    private let labelHeight: CGFloat = 34
     let image: ImageItem
     let isSelected: Bool
     let isMultiSelected: Bool
@@ -3004,6 +3006,14 @@ private struct ThumbnailCell: View {
     let onToggleFavorite: () -> Void
     let onTrash: () -> Void
 
+    private var cellWidth: CGFloat {
+        CGFloat(thumbnailHeight)
+    }
+
+    private var thumbnailSideLength: CGFloat {
+        max(cellWidth - (cardInset * 2), 1)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             ZStack(alignment: .topTrailing) {
@@ -3013,8 +3023,11 @@ private struct ThumbnailCell: View {
                     isSuspended: suspendThumbnailLoading,
                     squareCrop: squareCrop
                 )
-                    .frame(height: thumbnailHeight)
-                    .frame(maxWidth: .infinity)
+                    .frame(
+                        width: squareCrop ? thumbnailSideLength : nil,
+                        height: squareCrop ? thumbnailSideLength : CGFloat(thumbnailHeight)
+                    )
+                    .frame(maxWidth: squareCrop ? nil : .infinity)
                     .background(Color(nsColor: .windowBackgroundColor))
                     .clipShape(RoundedRectangle(cornerRadius: 10))
 
@@ -3032,8 +3045,10 @@ private struct ThumbnailCell: View {
             Text(image.displayLabel)
                 .font(.subheadline)
                 .lineLimit(2)
+                .frame(maxWidth: .infinity, minHeight: labelHeight, alignment: .topLeading)
         }
-        .padding(10)
+        .padding(cardInset)
+        .frame(width: cellWidth, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 12)
                 .fill(cardFillColor)
