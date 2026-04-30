@@ -3146,6 +3146,7 @@ private struct ThumbnailCell: View {
             radius: colorScheme == .dark ? 0 : 8,
             y: colorScheme == .dark ? 0 : 2
         )
+        .opacity(isHidden ? 0.45 : 1.0)
         .contentShape(RoundedRectangle(cornerRadius: 12))
         .onTapGesture {
             onSelect()

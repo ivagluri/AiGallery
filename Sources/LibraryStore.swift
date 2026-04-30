@@ -43,6 +43,7 @@ final class LibraryStore: ObservableObject {
         guard folderPaths != excludedFolderPaths || imagePaths != excludedImagePaths else { return }
         excludedFolderPaths = folderPaths
         excludedImagePaths = imagePaths
+        rebuildCategories()
         smartFilterTask?.cancel()
         smartFilterTask = Task { await resolveSmartFilters() }
     }
@@ -927,9 +928,17 @@ final class LibraryStore: ObservableObject {
 
     private func rebuildCategories() {
         let allSourceImages = sourceCategories.flatMap(\.images)
-        let favoriteImages = allSourceImages
+        var favoriteImages = allSourceImages
             .filter { favoriteImageIDs.contains($0.id) }
             .sorted { $0.displayLabel.localizedCaseInsensitiveCompare($1.displayLabel) == .orderedAscending }
+        if !excludedImagePaths.isEmpty {
+            favoriteImages = favoriteImages.filter { !excludedImagePaths.contains($0.id) }
+        }
+        if !excludedFolderPaths.isEmpty {
+            favoriteImages = favoriteImages.filter { img in
+                !excludedFolderPaths.contains(where: { img.fileURL.path.hasPrefix($0 + "/") })
+            }
+        }
 
         var syntheticCategories: [Category] = []
         let placeholder = URL(fileURLWithPath: "/")
