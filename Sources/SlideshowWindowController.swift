@@ -26,6 +26,7 @@ final class SlideshowWindowController: NSObject, NSWindowDelegate {
     private(set) var isPresented = false
     private var window: NSWindow?
     private var hostingController: NSHostingController<SlideshowRootView>?
+    private weak var returningWindow: NSWindow?
 
     private var images: [ImageItem] = []
     private var currentIndex: Int = 0
@@ -42,6 +43,7 @@ final class SlideshowWindowController: NSObject, NSWindowDelegate {
 
     func present(images: [ImageItem], startIndex: Int, settings: SlideshowSettingsSnapshot, metadataSource: LibraryStore) {
         guard !images.isEmpty else { return }
+        returningWindow = NSApp.keyWindow
         dismiss()
 
         self.images = images
@@ -74,7 +76,7 @@ final class SlideshowWindowController: NSObject, NSWindowDelegate {
             backing: .buffered,
             defer: false
         )
-        win.collectionBehavior = [.fullScreenPrimary]
+        win.collectionBehavior = [.fullScreenPrimary, .moveToActiveSpace]
         win.titlebarAppearsTransparent = true
         win.titleVisibility = .hidden
         win.backgroundColor = settings.nsBackgroundColor
@@ -101,13 +103,8 @@ final class SlideshowWindowController: NSObject, NSWindowDelegate {
         stopTimer()
         prefetchTask?.cancel()
         isPresented = false
-        if win.styleMask.contains(.fullScreen) {
-            win.toggleFullScreen(nil)
-            // window closed in windowDidExitFullScreen
-        } else {
-            win.close()
-            cleanup()
-        }
+        win.close()
+        // cleanup() called from windowWillClose
     }
 
     // MARK: - Navigation
@@ -247,5 +244,7 @@ final class SlideshowWindowController: NSObject, NSWindowDelegate {
         hostingController = nil
         images = []
         isPresented = false
+        returningWindow?.makeKeyAndOrderFront(nil)
+        returningWindow = nil
     }
 }
