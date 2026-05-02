@@ -936,7 +936,9 @@ struct ContentView: View {
             isNegativeExpanded: $isNegativePromptExpanded,
             prompt: prompt,
             negativePrompt: negativePrompt,
-            promptStatusMessage: promptStatusMessage
+            promptStatusMessage: promptStatusMessage,
+            copiedValue: copiedInspectorValue,
+            onCopy: copyInspectorValue
         )
     }
 
@@ -1299,6 +1301,11 @@ struct ContentView: View {
                         columns: gridColumns,
                         spacing: 16
                     ) {
+                        let effectiveMultiCount: Int = {
+                            var ids = multiSelectedImageIDs
+                            if let pid = isSearching ? searchSelectedImageID : library.selectedImageID { ids.insert(pid) }
+                            return ids.count
+                        }()
                         ForEach(images) { image in
                             ThumbnailCell(
                                 image: image,
@@ -1307,6 +1314,7 @@ struct ContentView: View {
                                 thumbnailHeight: thumbnailSize,
                                 squareCrop: squareCropThumbnails,
                                 isFavorite: library.isFavorite(image),
+                                multiSelectedCount: effectiveMultiCount,
                                 suspendThumbnailLoading: isInspectorResizing,
                                 isHidden: hiddenImageIDs.contains(image.id),
                                 onSelect: {
@@ -1319,7 +1327,7 @@ struct ContentView: View {
                                     launchSlideshow(startingAt: image)
                                 },
                                 onToggleFavorite: {
-                                    library.toggleFavorite(image)
+                                    handleThumbnailFavorite(image)
                                 },
                                 onToggleHidden: {
                                     toggleImageHidden(image)
@@ -1600,6 +1608,7 @@ struct ContentView: View {
             thumbnailHeight: thumbnailSize,
             squareCrop: squareCropThumbnails,
             isFavorite: library.isFavorite(match.image),
+            multiSelectedCount: 1,
             suspendThumbnailLoading: false,
             isHidden: hiddenImageIDs.contains(match.image.id),
             onSelect: { selectKinMatch(match.image) },
@@ -2123,6 +2132,20 @@ private func isCollapsedActiveNode(_ node: SidebarNode) -> Bool {
         selectImage(image)
     }
 
+    private func handleThumbnailFavorite(_ image: ImageItem) {
+        let primaryID = isSearching ? searchSelectedImageID : library.selectedImageID
+        let isInGroup = multiSelectedImageIDs.contains(image.id) || image.id == primaryID
+        guard !multiSelectedImageIDs.isEmpty && isInGroup else {
+            library.toggleFavorite(image)
+            return
+        }
+        var ids = multiSelectedImageIDs
+        if let pid = primaryID { ids.insert(pid) }
+        let images = displayImages.filter { ids.contains($0.id) }
+        let allFavorited = images.allSatisfy { library.isFavorite($0) }
+        library.setFavorites(images, favorited: !allFavorited)
+    }
+
     private func handleThumbnailTrash(_ image: ImageItem) {
         let primaryID = isSearching ? searchSelectedImageID : library.selectedImageID
         let isInGroup = multiSelectedImageIDs.contains(image.id) || image.id == primaryID
@@ -2242,7 +2265,7 @@ private func isCollapsedActiveNode(_ node: SidebarNode) -> Bool {
         }
 
         if let image = displayedSelectedImage {
-            library.toggleFavorite(image)
+            handleThumbnailFavorite(image)
         }
 
         return nil
@@ -3081,6 +3104,7 @@ private struct ThumbnailCell: View {
     let thumbnailHeight: Double
     let squareCrop: Bool
     let isFavorite: Bool
+    let multiSelectedCount: Int
     let suspendThumbnailLoading: Bool
     let isHidden: Bool
     let onSelect: () -> Void
@@ -3174,10 +3198,14 @@ private struct ThumbnailCell: View {
                 onSelect()
                 onToggleFavorite()
             } label: {
-                Label(
-                    isFavorite ? "Remove from Favorites" : "Add to Favorites",
-                    systemImage: isFavorite ? "star.fill" : "star"
-                )
+                if multiSelectedCount > 1 {
+                    Label("Favorite \(multiSelectedCount) Images", systemImage: "star")
+                } else {
+                    Label(
+                        isFavorite ? "Remove from Favorites" : "Add to Favorites",
+                        systemImage: isFavorite ? "star.fill" : "star"
+                    )
+                }
             }
 
             Divider()
@@ -3431,6 +3459,8 @@ private struct PromptInspectorCard: View {
     let prompt: String?
     let negativePrompt: String?
     let promptStatusMessage: String?
+    let copiedValue: String?
+    let onCopy: (String) -> Void
 
     var body: some View {
         let showsPositivePrompt = prompt?.isEmpty == false
@@ -3442,7 +3472,9 @@ private struct PromptInspectorCard: View {
                 PromptDisclosureBlock(
                     title: "Positive Prompt",
                     value: prompt,
-                    isExpanded: $isPositiveExpanded
+                    isExpanded: $isPositiveExpanded,
+                    isCopied: copiedValue == prompt,
+                    onCopy: { onCopy(prompt) }
                 )
             }
 
@@ -3469,7 +3501,9 @@ private struct PromptInspectorCard: View {
                 PromptDisclosureBlock(
                     title: "Negative Prompt",
                     value: negativePrompt,
-                    isExpanded: $isNegativeExpanded
+                    isExpanded: $isNegativeExpanded,
+                    isCopied: copiedValue == negativePrompt,
+                    onCopy: { onCopy(negativePrompt) }
                 )
             }
         }
@@ -3494,6 +3528,8 @@ private struct PromptDisclosureBlock: View {
     let title: String
     let value: String
     @Binding var isExpanded: Bool
+    let isCopied: Bool
+    let onCopy: () -> Void
 
     var body: some View {
         DisclosureGroup(isExpanded: $isExpanded) {
@@ -3502,13 +3538,24 @@ private struct PromptDisclosureBlock: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.top, 8)
         } label: {
-            Text(title)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
+            HStack(spacing: 0) {
+                Text(title)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button(action: onCopy) {
+                    Image(systemName: isCopied ? "checkmark" : "doc.on.doc")
+                        .font(.caption)
+                        .foregroundStyle(isCopied ? Color.accentColor : Color.secondary)
+                        .frame(width: 20, height: 20)
+                }
+                .buttonStyle(.plain)
+                .help("Copy \(title)")
+            }
         }
-                .frame(maxWidth: .infinity, alignment: .leading)
-        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
+}
 
     private func revealInFinder(_ url: URL) {
         NSWorkspace.shared.activateFileViewerSelecting([url])

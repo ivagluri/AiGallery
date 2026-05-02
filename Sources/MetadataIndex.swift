@@ -364,14 +364,17 @@ actor MetadataIndex {
     }
 
     private static func extractRow(for image: ImageItem, modDate: Double) -> IndexRow {
-        let isPNG = image.fileURL.pathExtension.lowercased() == "png"
-        let pngMeta: ImageMetadata? = isPNG ? PNGInfoReader.read(from: image.fileURL) : nil
-        // Only fall back to folder metadata if PNG parse found nothing.
-        let folderMeta: ImageMetadata? = pngMeta == nil
-            ? FolderMetadataReader.read(from: image.fileURL.deletingLastPathComponent())
-            : nil
+        let ext = image.fileURL.pathExtension.lowercased()
+        let embeddedMeta: ImageMetadata? = (ext == "png")
+            ? PNGInfoReader.read(from: image.fileURL)
+            : JpegMetadataReader.read(from: image.fileURL)
+        let sidecarMeta: ImageMetadata? = embeddedMeta == nil
+            ? FolderMetadataReader.readSidecar(for: image.fileURL) : nil
+        let folderMeta: ImageMetadata? = (embeddedMeta == nil && sidecarMeta == nil)
+            ? FolderMetadataReader.read(from: image.fileURL.deletingLastPathComponent()) : nil
+        let resolvedMeta = embeddedMeta ?? sidecarMeta ?? folderMeta
 
-        let params = pngMeta?.generationParameters ?? folderMeta?.generationParameters ?? []
+        let params = resolvedMeta?.generationParameters ?? []
         guard !params.isEmpty else {
             return IndexRow(modDate: modDate)
         }
@@ -418,9 +421,9 @@ actor MetadataIndex {
             if parts.count == 2 { width = Int(parts[0]); height = Int(parts[1]) }
         }
 
-        let prompt = (pngMeta?.prompt ?? folderMeta?.prompt)
+        let prompt = resolvedMeta?.prompt
             .flatMap { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-        let negativePrompt = (pngMeta?.negativePrompt ?? folderMeta?.negativePrompt)
+        let negativePrompt = resolvedMeta?.negativePrompt
             .flatMap { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0.trimmingCharacters(in: .whitespacesAndNewlines) }
 
         let seed = param("Seed", in: params)

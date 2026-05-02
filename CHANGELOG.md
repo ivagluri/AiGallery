@@ -1,5 +1,12 @@
 # Changelog
 
+## Midstream updates 2/5/2026
+
+- **UI improvements** -- Can now favorite multiple selected items
+- **UI imprvements** -- added a convenience "prompt copy" button to infopane.
+- **metadata improvements** -- now reads embedded info in jpg files from auto1111/forge/etc outputs.  Also now reads sidecar txt for infotext as well if image has none (image.jpg/image.txt).  
+
+
 ## v2.2.2
 
 - **add hidden folders** -- now able to hide folders or individual images from the gallery and also hides from search results and smart filters.

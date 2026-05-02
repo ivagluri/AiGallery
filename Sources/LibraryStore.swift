@@ -21,7 +21,8 @@ final class LibraryStore: ObservableObject {
 
     private let fileManager = FileManager.default
     private let userDefaults: UserDefaults
-    private var pngInfoCache: [String: ImageMetadata?] = [:]
+    private var embeddedMetadataCache: [String: ImageMetadata?] = [:]
+    private var sidecarMetadataCache: [String: ImageMetadata?] = [:]
     private var folderMetadataCache: [String: ImageMetadata?] = [:]
     private var sourceCategoriesByRoot: [URL: [Category]] = [:]
     private var searchIndexByRoot: [URL: [ImageItem]] = [:]
@@ -233,7 +234,8 @@ final class LibraryStore: ObservableObject {
                 await MainActor.run {
                     sourceCategoriesByRoot = finalCats
                     searchIndexByRoot = finalIdx
-                    pngInfoCache.removeAll()
+                    embeddedMetadataCache.removeAll()
+                    sidecarMetadataCache.removeAll()
                     folderMetadataCache.removeAll()
                     pruneFavoritesToExistingImages()
                     rebuildCategories()
@@ -272,7 +274,8 @@ final class LibraryStore: ObservableObject {
                 await index?.clearAll()
             }
             await MainActor.run {
-                self.pngInfoCache.removeAll()
+                self.embeddedMetadataCache.removeAll()
+                self.sidecarMetadataCache.removeAll()
                 self.folderMetadataCache.removeAll()
                 self.filteredImagePaths = []
                 for url in urls {
@@ -409,6 +412,19 @@ final class LibraryStore: ObservableObject {
         )
     }
 
+    func setFavorites(_ images: [ImageItem], favorited: Bool) {
+        guard !images.isEmpty else { return }
+        let ids = Set(images.map(\.id))
+        if favorited { favoriteImageIDs.formUnion(ids) } else { favoriteImageIDs.subtract(ids) }
+        persistFavoriteImageIDs()
+        rebuildCategories()
+        selectedCategoryID = Self.validCategoryID(current: selectedCategoryID, categories: categories)
+        persistSelectedCategoryID(selectedCategoryID)
+        selectedImageID = Self.validImageID(
+            current: selectedImageID, categories: categories, selectedCategoryID: selectedCategoryID
+        )
+    }
+
     // MARK: - Trash
 
     func trashImage(_ image: ImageItem) {
@@ -488,36 +504,29 @@ final class LibraryStore: ObservableObject {
 
     // MARK: - Metadata info
 
-    func pngInfo(for image: ImageItem) -> ImageMetadata? {
-        if let cached = pngInfoCache[image.id] { return cached }
-        let info = PNGInfoReader.read(from: image.fileURL)
-        pngInfoCache[image.id] = info
+    func embeddedMetadata(for image: ImageItem) -> ImageMetadata? {
+        if let cached = embeddedMetadataCache[image.id] { return cached }
+        let ext = image.fileURL.pathExtension.lowercased()
+        let info = ext == "png"
+            ? PNGInfoReader.read(from: image.fileURL)
+            : JpegMetadataReader.read(from: image.fileURL)
+        embeddedMetadataCache[image.id] = info
+        return info
+    }
+
+    private func sidecarMetadata(for image: ImageItem) -> ImageMetadata? {
+        if let cached = sidecarMetadataCache[image.id] { return cached }
+        let info = FolderMetadataReader.readSidecar(for: image.fileURL)
+        sidecarMetadataCache[image.id] = info
         return info
     }
 
     func inspectorMetadata(for image: ImageItem) -> ImageMetadata? {
-        let pngInfo = pngInfo(for: image)
-        let folderMeta = folderMetadata(for: image)
-
-        let prompt = pngInfo?.prompt ?? folderMeta?.prompt
-        let negativePrompt = pngInfo?.negativePrompt ?? folderMeta?.negativePrompt
-        let promptStatusMessage = prompt == nil
-            ? (pngInfo?.promptStatusMessage ?? folderMeta?.promptStatusMessage)
-            : nil
-        let generationParameters = mergeEntries(
-            primary: pngInfo?.generationParameters ?? [],
-            fallback: folderMeta?.generationParameters ?? []
-        )
-        let textEntries = mergeEntries(
-            primary: pngInfo?.textEntries ?? [],
-            fallback: folderMeta?.textEntries ?? []
-        )
-        let metadata = ImageMetadata(
-            prompt: prompt, negativePrompt: negativePrompt,
-            promptStatusMessage: promptStatusMessage,
-            generationParameters: generationParameters, textEntries: textEntries
-        )
-        return metadata.hasVisibleContent ? metadata : nil
+        let embedded = embeddedMetadata(for: image)
+        let sidecar  = embedded == nil ? sidecarMetadata(for: image) : nil
+        let folder   = (embedded == nil && sidecar == nil) ? folderMetadata(for: image) : nil
+        let meta = embedded ?? sidecar ?? folder
+        return meta?.hasVisibleContent == true ? meta : nil
     }
 
     func kinMatches(for image: ImageItem) async -> [KinMatch] {

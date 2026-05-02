@@ -64,6 +64,17 @@ enum PNGInfoReader {
         )
     }
 
+    static func readInfotext(_ text: String) -> ImageMetadata? {
+        let parsed = parseAutomatic1111Parameters(text)
+        guard parsed.prompt != nil || !parsed.parameters.isEmpty else { return nil }
+        let meta = ImageMetadata(
+            prompt: parsed.prompt, negativePrompt: parsed.negativePrompt,
+            promptStatusMessage: nil,
+            generationParameters: parsed.parameters, textEntries: []
+        )
+        return meta.hasVisibleContent ? meta : nil
+    }
+
     private static func parseTextEntries(from data: Data) -> [PNGTextEntry] {
         var entries: [PNGTextEntry] = []
         var offset = 8

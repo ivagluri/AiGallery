@@ -269,6 +269,16 @@ enum FolderMetadataReader {
 
         return deduped
     }
+
+    static func readSidecar(for imageURL: URL) -> ImageMetadata? {
+        let sidecarURL = imageURL.deletingPathExtension().appendingPathExtension("txt")
+        guard
+            let attrs = try? FileManager.default.attributesOfItem(atPath: sidecarURL.path),
+            let size = attrs[.size] as? Int, size > 0, size <= 1_024 * 1_024,
+            let text = try? String(contentsOf: sidecarURL, encoding: .utf8)
+        else { return nil }
+        return PNGInfoReader.readInfotext(text)
+    }
 }
 
 private extension String {
