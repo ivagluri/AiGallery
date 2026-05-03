@@ -96,10 +96,6 @@ func parseSearchQuery(_ query: String) -> ParsedSearchQuery {
     return ParsedSearchQuery(requiredTerms: requiredTerms, excludedTerms: excludedTerms)
 }
 
-func parseSearchTerms(_ query: String) -> [String] {
-    parseSearchQuery(query).requiredTerms
-}
-
 private func searchImages(
     matching query: String,
     in images: [ImageItem],

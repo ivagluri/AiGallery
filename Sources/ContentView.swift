@@ -1303,7 +1303,7 @@ struct ContentView: View {
                     ) {
                         let effectiveMultiCount: Int = {
                             var ids = multiSelectedImageIDs
-                            if let pid = isSearching ? searchSelectedImageID : library.selectedImageID { ids.insert(pid) }
+                            if let pid = primarySelectedImageID { ids.insert(pid) }
                             return ids.count
                         }()
                         ForEach(images) { image in
@@ -1948,6 +1948,10 @@ private func isCollapsedActiveNode(_ node: SidebarNode) -> Bool {
             ?? library.selectedCategory?.images.first
     }
 
+    private var primarySelectedImageID: ImageItem.ID? {
+        isSearching ? searchSelectedImageID : library.selectedImageID
+    }
+
     private var searchResultsSummary: String {
         let resultCount = activeSearchResults.totalMatches
         let visibleCount = activeSearchResults.images.count
@@ -2046,15 +2050,7 @@ private func isCollapsedActiveNode(_ node: SidebarNode) -> Bool {
         guard !searchText.isEmpty || !activeSearchText.isEmpty || savedBrowseSelection != nil else {
             return
         }
-
-        clearMultiSelection()
-        pendingSearchTask?.cancel()
-        searchText = ""
-        activeSearchText = ""
-        activeSearchResults = .empty
-        searchSelectedImageID = nil
-        savedBrowseSelection = nil
-        isSearchFieldFocused = false
+        clearSearch()
     }
 
     private func restoreBrowseSelection() {
@@ -2108,7 +2104,7 @@ private func isCollapsedActiveNode(_ node: SidebarNode) -> Bool {
     }
 
     private func handleCmdClick(_ image: ImageItem) {
-        let primaryID = isSearching ? searchSelectedImageID : library.selectedImageID
+        let primaryID = primarySelectedImageID
         if let primaryID { multiSelectedImageIDs.insert(primaryID) }
         if multiSelectedImageIDs.contains(image.id) {
             multiSelectedImageIDs.remove(image.id)
@@ -2121,7 +2117,7 @@ private func isCollapsedActiveNode(_ node: SidebarNode) -> Bool {
     private func handleShiftClick(_ image: ImageItem) {
         let images = displayImages
         guard !images.isEmpty else { selectImage(image); return }
-        let anchorID = isSearching ? searchSelectedImageID : library.selectedImageID
+        let anchorID = primarySelectedImageID
         let anchorIndex = anchorID.flatMap { id in images.firstIndex { $0.id == id } } ?? 0
         guard let targetIndex = images.firstIndex(where: { $0.id == image.id }) else {
             selectImage(image); return
@@ -2133,7 +2129,7 @@ private func isCollapsedActiveNode(_ node: SidebarNode) -> Bool {
     }
 
     private func handleThumbnailFavorite(_ image: ImageItem) {
-        let primaryID = isSearching ? searchSelectedImageID : library.selectedImageID
+        let primaryID = primarySelectedImageID
         let isInGroup = multiSelectedImageIDs.contains(image.id) || image.id == primaryID
         guard !multiSelectedImageIDs.isEmpty && isInGroup else {
             library.toggleFavorite(image)
@@ -2147,7 +2143,7 @@ private func isCollapsedActiveNode(_ node: SidebarNode) -> Bool {
     }
 
     private func handleThumbnailTrash(_ image: ImageItem) {
-        let primaryID = isSearching ? searchSelectedImageID : library.selectedImageID
+        let primaryID = primarySelectedImageID
         let isInGroup = multiSelectedImageIDs.contains(image.id) || image.id == primaryID
         if !multiSelectedImageIDs.isEmpty && isInGroup {
             confirmAndTrashMultiSelection()
@@ -2158,7 +2154,7 @@ private func isCollapsedActiveNode(_ node: SidebarNode) -> Bool {
 
     private func confirmAndTrashMultiSelection() {
         var ids = multiSelectedImageIDs
-        if let pid = isSearching ? searchSelectedImageID : library.selectedImageID { ids.insert(pid) }
+        if let pid = primarySelectedImageID { ids.insert(pid) }
         let images = displayImages.filter { ids.contains($0.id) }
         guard images.count > 1 else {
             if let single = images.first { library.trashImage(single) }
@@ -2271,20 +2267,14 @@ private func isCollapsedActiveNode(_ node: SidebarNode) -> Bool {
         return nil
     }
 
-    private func shouldHandlePreviewHotkey(_ event: NSEvent) -> Bool {
-        guard
-            event.keyCode == 49,
-            displayedSelectedImage != nil
-        else {
-            return false
-        }
-
+    private func canHandleHotkey(_ event: NSEvent) -> Bool {
         let disallowedModifiers = event.modifierFlags.intersection([.command, .control, .option])
-        guard disallowedModifiers.isEmpty else {
-            return false
-        }
-
+        guard disallowedModifiers.isEmpty else { return false }
         return !isSearchFieldFocused && !(hostWindow?.firstResponder is NSTextView)
+    }
+
+    private func shouldHandlePreviewHotkey(_ event: NSEvent) -> Bool {
+        event.keyCode == 49 && displayedSelectedImage != nil && canHandleHotkey(event)
     }
 
     private func handleNavigationHotkey(_ event: NSEvent) -> NSEvent? {
@@ -2368,16 +2358,7 @@ private func isCollapsedActiveNode(_ node: SidebarNode) -> Bool {
     }
 
     private func shouldHandleFavoriteHotkey(_ event: NSEvent) -> Bool {
-        guard displayedSelectedImage != nil, !isInspectingDroppedImage else {
-            return false
-        }
-
-        let disallowedModifiers = event.modifierFlags.intersection([.command, .control, .option])
-        guard disallowedModifiers.isEmpty else {
-            return false
-        }
-
-        return !isSearchFieldFocused && !(hostWindow?.firstResponder is NSTextView)
+        displayedSelectedImage != nil && !isInspectingDroppedImage && canHandleHotkey(event)
     }
 
     private func handleTrashHotkey(_ event: NSEvent) -> NSEvent? {
@@ -2395,29 +2376,11 @@ private func isCollapsedActiveNode(_ node: SidebarNode) -> Bool {
     }
 
     private func shouldHandleTrashHotkey(_ event: NSEvent) -> Bool {
-        guard displayedSelectedImage != nil, !isInspectingDroppedImage else {
-            return false
-        }
-
-        let disallowedModifiers = event.modifierFlags.intersection([.command, .control, .option])
-        guard disallowedModifiers.isEmpty else {
-            return false
-        }
-
-        return !isSearchFieldFocused && !(hostWindow?.firstResponder is NSTextView)
+        shouldHandleFavoriteHotkey(event)
     }
 
     private func shouldHandleNavigationHotkey(_ event: NSEvent) -> Bool {
-        guard !displayImages.isEmpty else {
-            return false
-        }
-
-        let disallowedModifiers = event.modifierFlags.intersection([.command, .control, .option])
-        guard disallowedModifiers.isEmpty else {
-            return false
-        }
-
-        return !isSearchFieldFocused && !(hostWindow?.firstResponder is NSTextView)
+        !displayImages.isEmpty && canHandleHotkey(event)
     }
 
     private func moveSelection(delta: Int?, absoluteIndex: Int?, scrollBehavior: GridScrollBehavior) {
