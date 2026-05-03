@@ -936,7 +936,11 @@ final class LibraryStore: ObservableObject {
     // MARK: - Category rebuilding
 
     private func rebuildCategories() {
+        // sourceCategories only covers fully-loaded roots; searchIndex also has images from
+        // background-indexed roots. Merge both so favorites from any root are visible.
+        let loadedImageIDs = Set(sourceCategories.flatMap(\.images).map(\.id))
         let allSourceImages = sourceCategories.flatMap(\.images)
+            + searchIndex.filter { !loadedImageIDs.contains($0.id) }
         var favoriteImages = allSourceImages
             .filter { favoriteImageIDs.contains($0.id) }
             .sorted { $0.displayLabel.localizedCaseInsensitiveCompare($1.displayLabel) == .orderedAscending }

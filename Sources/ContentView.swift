@@ -171,6 +171,16 @@ struct ContentView: View {
                 handleKeyEvent(event)
             }
         )
+        .background(
+            KeyAwareView(isActive: isSearching) { event in
+                guard event.type == .keyDown, event.keyCode == 53 else { return false }
+                if diffAnchorImage != nil {
+                    withAnimation(.easeOut(duration: 0.18)) { endDiffMode(restoreAnchorSelection: true) }
+                }
+                clearSearch()
+                return true
+            }
+        )
         .overlay {
             if isDropTargeted {
                 dropTargetOverlay
