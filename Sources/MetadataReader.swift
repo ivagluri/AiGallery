@@ -104,6 +104,7 @@ enum MetadataReader {
 
     // MARK: - Shared utilities
 
+    // Scalar-only: used by ComfyUI node helpers where [Any] = node reference, not displayable text.
     private static func stringify(_ value: Any?) -> String? {
         switch value {
         case let string as String:
@@ -117,12 +118,18 @@ enum MetadataReader {
             return String(double)
         case let bool as Bool:
             return bool ? "Yes" : "No"
-        case let array as [Any]:
-            let parts = array.compactMap(stringify)
-            return parts.isEmpty ? nil : parts.joined(separator: ", ")
         default:
             return nil
         }
+    }
+
+    // Array-aware: used by folder metadata helpers where [Any] is a legitimate displayable list.
+    private static func stringifyValue(_ value: Any?) -> String? {
+        if let array = value as? [Any] {
+            let parts = array.compactMap(stringify)
+            return parts.isEmpty ? nil : parts.joined(separator: ", ")
+        }
+        return stringify(value)
     }
 
     private static func stringValue(forKeys keys: [String], in dictionary: [String: Any]) -> String? {
@@ -720,7 +727,7 @@ enum MetadataReader {
             }
         case let dictionary as [String: Any]:
             return dictionary.compactMap { key, entryValue in
-                guard let value = stringify(entryValue)?.nilIfEmpty else { return nil }
+                guard let value = stringifyValue(entryValue)?.nilIfEmpty else { return nil }
                 return PNGTextEntry(keyword: defaultKeywordTransform(key), value: value)
             }
             .sorted { $0.keyword.localizedCaseInsensitiveCompare($1.keyword) == .orderedAscending }
@@ -737,7 +744,7 @@ enum MetadataReader {
         ]
         return dictionary.compactMap { key, value in
             let normalizedKey = key.replacingOccurrences(of: "_", with: "").lowercased()
-            guard !ignoredKeys.contains(normalizedKey), let stringified = stringify(value)?.nilIfEmpty else { return nil }
+            guard !ignoredKeys.contains(normalizedKey), let stringified = stringifyValue(value)?.nilIfEmpty else { return nil }
             return PNGTextEntry(keyword: humanizeKey(key), value: stringified)
         }
         .sorted { $0.keyword.localizedCaseInsensitiveCompare($1.keyword) == .orderedAscending }
