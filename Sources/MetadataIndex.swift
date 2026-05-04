@@ -366,12 +366,12 @@ actor MetadataIndex {
     private static func extractRow(for image: ImageItem, modDate: Double) -> IndexRow {
         let ext = image.fileURL.pathExtension.lowercased()
         let embeddedMeta: ImageMetadata? = (ext == "png")
-            ? PNGInfoReader.read(from: image.fileURL)
+            ? MetadataReader.read(image: image.fileURL)
             : JpegMetadataReader.read(from: image.fileURL)
         let sidecarMeta: ImageMetadata? = embeddedMeta == nil
-            ? FolderMetadataReader.readSidecar(for: image.fileURL) : nil
+            ? MetadataReader.readSidecar(for: image.fileURL) : nil
         let folderMeta: ImageMetadata? = (embeddedMeta == nil && sidecarMeta == nil)
-            ? FolderMetadataReader.read(from: image.fileURL.deletingLastPathComponent()) : nil
+            ? MetadataReader.read(folder: image.fileURL.deletingLastPathComponent()) : nil
         let resolvedMeta = embeddedMeta ?? sidecarMeta ?? folderMeta
 
         let params = resolvedMeta?.generationParameters ?? []

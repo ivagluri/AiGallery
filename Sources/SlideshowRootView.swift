@@ -87,6 +87,14 @@ struct SlideshowRootView: View {
             controller.advance()
             controller.resetTimer()
             return true
+        case 3: // F — toggle favorite
+            if let image = viewModel.currentImage {
+                controller.metadataSource?.toggleFavorite(image)
+            }
+            return true
+        case 35: // P — cycle info overlay
+            controller.cycleOverlayPreset()
+            return true
         default:
             return false
         }

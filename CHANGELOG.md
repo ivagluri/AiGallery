@@ -1,11 +1,18 @@
 # Changelog
 
-## Midstream updates 2/5/2026
+## v3.0
 
-- **UI improvements** -- Can now favorite multiple selected items
-- **UI imprvements** -- added a convenience "prompt copy" button to infopane.
-- **metadata improvements** -- now reads embedded info in jpg files from auto1111/forge/etc outputs.  Also now reads sidecar txt for infotext as well if image has none (image.jpg/image.txt).  
-
+- **Delete from image viewer** — press Backspace while the fullscreen viewer is open to move the current image to trash. The viewer advances to the next image automatically; dismisses if it was the last one.
+- **Favorites in slideshow** — press `f` during slideshow playback to toggle the current image as a favorite. Updates the Favorites sidebar category immediately when you return.
+- **Overlay cycling in slideshow** — press `p` during slideshow playback to cycle the info overlay (none → filename → basic info → full prompt), matching the viewer behaviour. Choice persists across sessions.
+- **Stale thumbnails after delete fixed** — deleted images are now immediately removed from search results, smart filter results, and the Favorites category without requiring a manual reload or new search.
+- **Favorites across all roots fixed** — images from roots that are registered but not currently expanded now appear correctly in the Favorites category.
+- **Esc clears search** — pressing Escape now clears an active search whether or not the search field is focused.
+- **Multiple selected favorites fixed** — favoriting while a search is active now correctly persists for images from non-active roots.
+- **UI improvements** — can now favorite multiple selected items; added a convenience prompt-copy button to the inspector.
+- **Metadata improvements** — reads embedded generation info from JPEG files (Auto1111/Forge/etc.); reads sidecar `.txt` infotext when the image itself has none (`image.jpg` + `image.txt`).
+- **Unified metadata reader** — `PNGInfoReader` and `FolderMetadataReader` merged into a single `MetadataReader` module with shared normalization pipeline (`stringify`, `deduplicate`, `humanizeKey`). Behavioral differences resolved: array stringify, case-insensitive dedup, combined acronym set (CFG, VAE, HIRES, ETA, RNG, SD).
+- **Image loader consolidation** — `ThumbnailImage` and `LargePreview` now share a single `AsyncImageContent` loader; each remains a thin rendering wrapper with its own placeholder and fit behaviour.
 
 ## v2.2.2
 

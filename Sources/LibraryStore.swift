@@ -443,6 +443,9 @@ final class LibraryStore: ObservableObject {
         for (rootURL, idx) in searchIndexByRoot {
             searchIndexByRoot[rootURL] = idx.filter { $0.id != image.id }
         }
+        for (id, images) in smartFilterResults {
+            smartFilterResults[id] = images.filter { $0.id != image.id }
+        }
 
         favoriteImageIDs.remove(image.id)
         persistFavoriteImageIDs()
@@ -472,6 +475,9 @@ final class LibraryStore: ObservableObject {
         }
         for (rootURL, idx) in searchIndexByRoot {
             searchIndexByRoot[rootURL] = idx.filter { !ids.contains($0.id) }
+        }
+        for (id, images) in smartFilterResults {
+            smartFilterResults[id] = images.filter { !ids.contains($0.id) }
         }
         favoriteImageIDs.subtract(ids)
         persistFavoriteImageIDs()
@@ -508,7 +514,7 @@ final class LibraryStore: ObservableObject {
         if let cached = embeddedMetadataCache[image.id] { return cached }
         let ext = image.fileURL.pathExtension.lowercased()
         let info = ext == "png"
-            ? PNGInfoReader.read(from: image.fileURL)
+            ? MetadataReader.read(image: image.fileURL)
             : JpegMetadataReader.read(from: image.fileURL)
         embeddedMetadataCache[image.id] = info
         return info
@@ -516,7 +522,7 @@ final class LibraryStore: ObservableObject {
 
     private func sidecarMetadata(for image: ImageItem) -> ImageMetadata? {
         if let cached = sidecarMetadataCache[image.id] { return cached }
-        let info = FolderMetadataReader.readSidecar(for: image.fileURL)
+        let info = MetadataReader.readSidecar(for: image.fileURL)
         sidecarMetadataCache[image.id] = info
         return info
     }
@@ -778,7 +784,7 @@ final class LibraryStore: ObservableObject {
     private func folderMetadata(for image: ImageItem) -> ImageMetadata? {
         let folderPath = image.fileURL.deletingLastPathComponent().path
         if let cached = folderMetadataCache[folderPath] { return cached }
-        let info = FolderMetadataReader.read(from: image.fileURL.deletingLastPathComponent())
+        let info = MetadataReader.read(folder: image.fileURL.deletingLastPathComponent())
         folderMetadataCache[folderPath] = info
         return info
     }
@@ -936,7 +942,11 @@ final class LibraryStore: ObservableObject {
     // MARK: - Category rebuilding
 
     private func rebuildCategories() {
+        // sourceCategories only covers fully-loaded roots; searchIndex also has images from
+        // background-indexed roots. Merge both so favorites from any root are visible.
+        let loadedImageIDs = Set(sourceCategories.flatMap(\.images).map(\.id))
         let allSourceImages = sourceCategories.flatMap(\.images)
+            + searchIndex.filter { !loadedImageIDs.contains($0.id) }
         var favoriteImages = allSourceImages
             .filter { favoriteImageIDs.contains($0.id) }
             .sorted { $0.displayLabel.localizedCaseInsensitiveCompare($1.displayLabel) == .orderedAscending }

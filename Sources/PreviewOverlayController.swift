@@ -16,6 +16,7 @@ struct PreviewOverlaySession {
     var canNavigateNext = false
     var onNavigate: ((PreviewOverlayNavigationAction) -> Void)?
     var onToggleFavorite: (() -> Void)?
+    var onTrash: (() -> Void)?
     var onStartSlideshow: (() -> Void)?
     var metadata: ImageMetadata?
     var overlayPreset: SlideshowOverlayPreset = .none
@@ -233,8 +234,11 @@ final class PreviewOverlayController: NSObject, ObservableObject, NSWindowDelega
             case 3:
                 self.activeSession?.onToggleFavorite?()
                 return nil
+            case 51:
+                self.activeSession?.onTrash?()
+                return nil
             case 35: // p — cycle info overlay
-                self.currentOverlayPreset = self.currentOverlayPreset.nextViewerPreset
+                self.currentOverlayPreset = self.currentOverlayPreset.next
                 UserDefaults.standard.set(self.currentOverlayPreset.rawValue, forKey: "previewOverlayPreset")
                 if let session = self.activeSession {
                     self.hostingController?.rootView = self.makeView(for: session)
@@ -292,13 +296,3 @@ private final class PreviewOverlayPanel: NSPanel {
     }
 }
 
-private extension SlideshowOverlayPreset {
-    var nextViewerPreset: SlideshowOverlayPreset {
-        switch self {
-        case .none:       return .filename
-        case .filename:   return .basicInfo
-        case .basicInfo:  return .fullPrompt
-        case .fullPrompt: return .none
-        }
-    }
-}
