@@ -1,0 +1,1030 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>AiGallery — Design Document</title>
+<style>
+  :root {
+    --bg: #0f172a;
+    --surface: #1e293b;
+    --border: #334155;
+    --text: #e2e8f0;
+    --muted: #94a3b8;
+    --accent: #3b82f6;
+    --accent-dim: #1d4ed8;
+    --green: #22c55e;
+    --amber: #f59e0b;
+    --red: #ef4444;
+    --purple: #a78bfa;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    font-size: 15px;
+    line-height: 1.7;
+    padding: 0 0 80px;
+  }
+
+  /* ── Header ── */
+  header {
+    background: linear-gradient(135deg, #0d1528 0%, #1a0a2e 100%);
+    border-bottom: 1px solid #1e3a8a;
+    padding: 48px 60px 40px;
+  }
+  header h1 {
+    font-size: 32px;
+    font-weight: 800;
+    background: linear-gradient(90deg, #60a5fa, #a78bfa);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    margin-bottom: 10px;
+  }
+  header .subtitle {
+    color: var(--muted);
+    font-size: 14px;
+    display: flex;
+    gap: 24px;
+    flex-wrap: wrap;
+  }
+  header .subtitle span { display: flex; align-items: center; gap: 6px; }
+  header .badge {
+    display: inline-block;
+    background: #1e3a8a;
+    color: #93c5fd;
+    padding: 2px 10px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-family: monospace;
+  }
+
+  /* ── Layout ── */
+  .container { max-width: 1100px; margin: 0 auto; padding: 0 40px; }
+
+  /* ── TOC ── */
+  nav {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 28px 32px;
+    margin: 40px auto;
+    max-width: 1100px;
+    margin-left: 40px;
+    margin-right: 40px;
+  }
+  nav h2 { font-size: 13px; color: var(--muted); font-weight: 700; letter-spacing: 2px; text-transform: uppercase; margin-bottom: 16px; }
+  nav ol { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 6px 32px; padding-left: 20px; }
+  nav li { font-size: 14px; }
+  nav a { color: #60a5fa; text-decoration: none; }
+  nav a:hover { text-decoration: underline; }
+  nav .sub { list-style: none; padding-left: 16px; margin-top: 4px; }
+  nav .sub li { font-size: 13px; color: var(--muted); }
+  nav .sub li::before { content: "— "; }
+
+  /* ── Sections ── */
+  section { margin: 60px auto; max-width: 1100px; padding: 0 40px; }
+  h2 {
+    font-size: 22px;
+    font-weight: 700;
+    color: #f1f5f9;
+    margin-bottom: 20px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  h2 .num {
+    background: var(--accent-dim);
+    color: #93c5fd;
+    width: 30px; height: 30px;
+    border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 13px; font-weight: 800;
+    flex-shrink: 0;
+  }
+  h3 {
+    font-size: 16px;
+    font-weight: 700;
+    color: #cbd5e1;
+    margin: 32px 0 14px;
+  }
+  p { color: var(--muted); margin-bottom: 14px; }
+
+  /* ── Tables ── */
+  .table-wrap { overflow-x: auto; margin: 20px 0; border-radius: 8px; border: 1px solid var(--border); }
+  table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+  th {
+    background: #1a2744;
+    color: #93c5fd;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    padding: 10px 16px;
+    text-align: left;
+  }
+  td { padding: 10px 16px; border-top: 1px solid #1e293b; color: var(--text); vertical-align: top; }
+  tr:nth-child(even) td { background: #0d1220; }
+  code {
+    background: #1e293b;
+    border: 1px solid #334155;
+    border-radius: 4px;
+    padding: 1px 6px;
+    font-family: "SF Mono", "Fira Code", monospace;
+    font-size: 12px;
+    color: #7dd3fc;
+  }
+
+  /* ── Code blocks ── */
+  pre {
+    background: #0d1220;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 20px 22px;
+    overflow-x: auto;
+    font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
+    font-size: 12.5px;
+    line-height: 1.65;
+    color: #94a3b8;
+    margin: 16px 0;
+  }
+  pre .fn   { color: #60a5fa; }  /* function names */
+  pre .cmt  { color: #4b5563; }  /* comments / arrows */
+  pre .kw   { color: #c084fc; }  /* keywords / special labels */
+  pre .str  { color: #34d399; }  /* strings / success paths */
+
+  /* ── SVG containers ── */
+  .diagram {
+    margin: 24px 0;
+    border-radius: 10px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    background: #080c18;
+  }
+  .diagram svg { display: block; width: 100%; height: auto; }
+  .diagram-label {
+    background: #0d1220;
+    border-top: 1px solid var(--border);
+    padding: 8px 16px;
+    font-size: 12px;
+    color: #4b5563;
+    font-style: italic;
+  }
+
+  /* ── Callout boxes ── */
+  .callout {
+    background: #0d1a2e;
+    border-left: 3px solid var(--accent);
+    border-radius: 0 8px 8px 0;
+    padding: 14px 18px;
+    margin: 18px 0;
+    font-size: 13.5px;
+    color: var(--muted);
+  }
+  .callout strong { color: #93c5fd; }
+
+  /* ── Speed layer badges ── */
+  .speed-instant { color: #22c55e; font-weight: 700; }
+  .speed-fast    { color: #f59e0b; font-weight: 700; }
+  .speed-slow    { color: #ef4444; font-weight: 700; }
+
+  /* ── Principle cards ── */
+  .principles { display: grid; grid-template-columns: repeat(auto-fill, minmax(440px, 1fr)); gap: 16px; margin-top: 20px; }
+  .principle {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 20px 22px;
+  }
+  .principle .p-num {
+    font-size: 11px;
+    font-weight: 700;
+    color: #475569;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    margin-bottom: 6px;
+  }
+  .principle h4 { font-size: 14px; font-weight: 700; color: #e2e8f0; margin-bottom: 8px; }
+  .principle p  { font-size: 13px; color: var(--muted); margin: 0; }
+
+  /* ── Type cards ── */
+  .type-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 14px; margin-top: 18px; }
+  .type-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px 18px;
+  }
+  .type-card .type-name { font-size: 14px; font-weight: 700; color: #7dd3fc; font-family: monospace; margin-bottom: 4px; }
+  .type-card .type-desc { font-size: 13px; color: var(--muted); margin-bottom: 8px; }
+  .type-card .type-fields { font-size: 12px; color: #475569; font-family: monospace; }
+  .type-card .type-fields span { display: block; line-height: 1.8; }
+
+  /* ── Loop sections ── */
+  .loop-section {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    margin-bottom: 24px;
+    overflow: hidden;
+  }
+  .loop-header {
+    background: #0d1a2e;
+    padding: 14px 20px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    border-bottom: 1px solid var(--border);
+  }
+  .loop-icon { font-size: 20px; }
+  .loop-title { font-size: 15px; font-weight: 700; color: #e2e8f0; }
+  .loop-trigger { font-size: 12px; color: #475569; font-family: monospace; margin-left: auto; }
+  .loop-body { padding: 0; }
+  .loop-body pre { border: none; border-radius: 0; margin: 0; background: #080c18; }
+</style>
+</head>
+<body>
+
+<!-- ═══════════════════════════ HEADER ═══════════════════════════ -->
+<header>
+  <h1>AiGallery — Design Document</h1>
+  <div class="subtitle">
+    <span>🍎 macOS 13+</span>
+    <span>🔤 Swift / SwiftUI</span>
+    <span>🗄 SQLite3 (system)</span>
+    <span><code>swift build</code></span>
+    <span><code>./scripts/build-app.sh</code></span>
+  </div>
+</header>
+
+<!-- ═══════════════════════════ TOC ═══════════════════════════ -->
+<nav>
+  <h2>Contents</h2>
+  <ol>
+    <li><a href="#s1">Source File Index</a></li>
+    <li><a href="#s2">The User Interface</a></li>
+    <li><a href="#s3">Component Architecture</a></li>
+    <li><a href="#s4">Three-Speed Data Model</a></li>
+    <li><a href="#s5">Core Data Types</a></li>
+    <li><a href="#s6">Feature Loops &amp; Function Maps</a>
+      <ul class="sub">
+        <li>App Startup</li>
+        <li>Folder Browsing</li>
+        <li>Background Indexing</li>
+        <li>Search</li>
+        <li>Metadata Filter Bar</li>
+        <li>Fullscreen Preview</li>
+        <li>Slideshow</li>
+        <li>Thumbnail Loading</li>
+        <li>Drag-and-Drop Inspection</li>
+        <li>Kin (Related Images)</li>
+      </ul>
+    </li>
+    <li><a href="#s7">Key Shared Utilities</a></li>
+    <li><a href="#s8">Design Principles</a></li>
+  </ol>
+</nav>
+
+<!-- ═══════════════════════════ S1: FILE INDEX ═══════════════════════════ -->
+<section id="s1">
+  <h2><span class="num">1</span> Source File Index</h2>
+  <div class="table-wrap">
+    <table>
+      <tr><th>File</th><th>Layer</th><th>Role</th><th style="text-align:right">Lines</th></tr>
+      <tr><td><code>TagBrowserApp.swift</code></td><td>Entry</td><td>App launch, menu bar, window setup</td><td style="text-align:right">62</td></tr>
+      <tr><td><code>ContentView.swift</code></td><td>UI</td><td>Full main window — sidebar, grid, inspector, search</td><td style="text-align:right">2,690</td></tr>
+      <tr><td><code>LibraryStore.swift</code></td><td>Brain</td><td>Central state — scanning, filtering, metadata, smart filters</td><td style="text-align:right">826</td></tr>
+      <tr><td><code>MetadataIndex.swift</code></td><td>Data</td><td>SQLite-backed persistent metadata index (actor)</td><td style="text-align:right">441</td></tr>
+      <tr><td><code>Models.swift</code></td><td>Foundation</td><td>Data blueprints: Category, ImageItem, ImageMetadata, etc.</td><td style="text-align:right">103</td></tr>
+      <tr><td><code>LibraryProfile.swift</code></td><td>Service</td><td>Search algorithm + folder-to-category naming</td><td style="text-align:right">190</td></tr>
+      <tr><td><code>PNGInfoReader.swift</code></td><td>Parser</td><td>PNG chunk parser — A1111, ComfyUI, DrawThings formats</td><td style="text-align:right">982</td></tr>
+      <tr><td><code>JpegMetadataReader.swift</code></td><td>Parser</td><td>JPEG EXIF metadata parser</td><td style="text-align:right">~80</td></tr>
+      <tr><td><code>FolderMetadataReader.swift</code></td><td>Parser</td><td>Folder-level JSON/CFG fallback metadata reader</td><td style="text-align:right">279</td></tr>
+      <tr><td><code>SafeImageLoader.swift</code></td><td>Service</td><td>Async thumbnail loader with memory/size safety limits</td><td style="text-align:right">194</td></tr>
+      <tr><td><code>PreviewOverlayController.swift</code></td><td>UI</td><td>Fullscreen preview — window, keyboard, lifecycle</td><td style="text-align:right">276</td></tr>
+      <tr><td><code>PreviewOverlayView.swift</code></td><td>UI</td><td>Fullscreen preview — SwiftUI visuals, scaling, controls</td><td style="text-align:right">336</td></tr>
+      <tr><td><code>SlideshowWindowController.swift</code></td><td>UI</td><td>Slideshow — window, timer, navigation, shuffle, prefetch</td><td style="text-align:right">256</td></tr>
+      <tr><td><code>SlideshowRootView.swift</code></td><td>UI</td><td>Slideshow — SwiftUI visuals, HUD, keyboard handling</td><td style="text-align:right">351</td></tr>
+      <tr><td><code>SlideshowCoordinator.swift</code></td><td>UI</td><td>Launch-signal relay (14 lines)</td><td style="text-align:right">14</td></tr>
+      <tr><td><code>SlideshowSettings.swift</code></td><td>Foundation</td><td>All slideshow preferences — enums + UserDefaults storage</td><td style="text-align:right">228</td></tr>
+      <tr><td><code>AppSettings.swift</code></td><td>Foundation</td><td>App mode preference (General vs. Legacy)</td><td style="text-align:right">33</td></tr>
+      <tr><td><code>WindowReader.swift</code></td><td>Utility</td><td>NSView bridges for keyboard capture and window access</td><td style="text-align:right">129</td></tr>
+    </table>
+  </div>
+</section>
+
+<!-- ═══════════════════════════ S2: UI ═══════════════════════════ -->
+<section id="s2">
+  <h2><span class="num">2</span> The User Interface</h2>
+  <p>The main window is a fixed three-panel layout. Panels can be resized or hidden but the structure never changes. Everything lives in <code>ContentView.swift</code>.</p>
+  <div class="diagram">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 460">
+      <rect width="900" height="460" fill="#0f172a" rx="10"/>
+      <!-- Top toolbar -->
+      <rect x="0" y="0" width="900" height="46" fill="#1e293b" rx="10"/>
+      <rect x="0" y="30" width="900" height="16" fill="#1e293b"/>
+      <text x="22" y="28" fill="#94a3b8" font-family="system-ui,sans-serif" font-size="13" font-weight="700">AiGallery</text>
+      <rect x="260" y="11" width="280" height="24" fill="#0f172a" rx="6" stroke="#334155" stroke-width="1"/>
+      <text x="400" y="27" fill="#475569" font-family="system-ui,sans-serif" font-size="11" text-anchor="middle">⌕  Search images and prompts...</text>
+      <rect x="570" y="13" width="22" height="20" fill="#1e3a5f" rx="4"/>
+      <text x="581" y="27" fill="#60a5fa" font-family="system-ui,sans-serif" font-size="11" text-anchor="middle">⊞</text>
+      <rect x="598" y="13" width="22" height="20" fill="#1e3a5f" rx="4"/>
+      <text x="609" y="27" fill="#60a5fa" font-family="system-ui,sans-serif" font-size="11" text-anchor="middle">▶</text>
+      <rect x="626" y="13" width="22" height="20" fill="#1e3a5f" rx="4"/>
+      <text x="637" y="27" fill="#60a5fa" font-family="system-ui,sans-serif" font-size="11" text-anchor="middle">ⓘ</text>
+      <!-- LEFT SIDEBAR -->
+      <rect x="0" y="46" width="212" height="382" fill="#1e293b"/>
+      <text x="14" y="70" fill="#64748b" font-family="system-ui,sans-serif" font-size="9" font-weight="700" letter-spacing="1">LIBRARY</text>
+      <rect x="8" y="76" width="196" height="28" fill="#1d4ed8" rx="5"/>
+      <text x="24" y="94" fill="#eff6ff" font-family="system-ui,sans-serif" font-size="11">▼  landscapes</text>
+      <text x="178" y="94" fill="#93c5fd" font-family="system-ui,sans-serif" font-size="10">142</text>
+      <text x="36" y="118" fill="#94a3b8" font-family="system-ui,sans-serif" font-size="11">    autumn</text>
+      <text x="36" y="136" fill="#94a3b8" font-family="system-ui,sans-serif" font-size="11">    winter</text>
+      <text x="36" y="154" fill="#94a3b8" font-family="system-ui,sans-serif" font-size="11">    spring</text>
+      <text x="22" y="176" fill="#94a3b8" font-family="system-ui,sans-serif" font-size="11">▶  portraits</text>
+      <text x="176" y="176" fill="#475569" font-family="system-ui,sans-serif" font-size="10">87</text>
+      <text x="22" y="196" fill="#94a3b8" font-family="system-ui,sans-serif" font-size="11">▶  abstract</text>
+      <text x="176" y="196" fill="#475569" font-family="system-ui,sans-serif" font-size="10">56</text>
+      <line x1="8" y1="210" x2="204" y2="210" stroke="#334155" stroke-width="1"/>
+      <text x="14" y="226" fill="#64748b" font-family="system-ui,sans-serif" font-size="9" font-weight="700" letter-spacing="1">SPECIAL</text>
+      <text x="22" y="244" fill="#94a3b8" font-family="system-ui,sans-serif" font-size="11">★  Favorites</text>
+      <text x="176" y="244" fill="#475569" font-family="system-ui,sans-serif" font-size="10">12</text>
+      <text x="22" y="264" fill="#94a3b8" font-family="system-ui,sans-serif" font-size="11">⊘  Filtered</text>
+      <line x1="8" y1="278" x2="204" y2="278" stroke="#334155" stroke-width="1"/>
+      <text x="14" y="294" fill="#64748b" font-family="system-ui,sans-serif" font-size="9" font-weight="700" letter-spacing="1">SMART FILTERS</text>
+      <text x="22" y="312" fill="#94a3b8" font-family="system-ui,sans-serif" font-size="11">⌕  SDXL landscapes</text>
+      <text x="22" y="330" fill="#94a3b8" font-family="system-ui,sans-serif" font-size="11">⌕  cinematic portraits</text>
+      <rect x="8" y="370" width="196" height="26" fill="#0f172a" rx="4" stroke="#334155" stroke-width="1"/>
+      <text x="106" y="387" fill="#3b82f6" font-family="system-ui,sans-serif" font-size="12" text-anchor="middle">+ New Smart Filter</text>
+      <!-- Sidebar label -->
+      <rect x="0" y="428" width="212" height="32" fill="#0d1528"/>
+      <text x="106" y="445" fill="#3b82f6" font-family="system-ui,sans-serif" font-size="10" text-anchor="middle" font-weight="700">SIDEBAR</text>
+      <text x="106" y="457" fill="#1e3a8a" font-family="system-ui,sans-serif" font-size="9" text-anchor="middle">ContentView › sidebar</text>
+      <!-- Divider -->
+      <rect x="212" y="46" width="1" height="414" fill="#334155"/>
+      <!-- CENTER GRID -->
+      <rect x="213" y="46" width="464" height="382" fill="#0f172a"/>
+      <rect x="213" y="46" width="464" height="38" fill="#1e293b"/>
+      <text x="228" y="69" fill="#e2e8f0" font-family="system-ui,sans-serif" font-size="12" font-weight="600">landscapes › autumn</text>
+      <text x="566" y="69" fill="#64748b" font-family="system-ui,sans-serif" font-size="10" text-anchor="end">142 images</text>
+      <rect x="582" y="54" width="22" height="22" fill="#1e293b" rx="4" stroke="#334155" stroke-width="1"/>
+      <text x="593" y="69" fill="#94a3b8" font-family="system-ui,sans-serif" font-size="11" text-anchor="middle">↕</text>
+      <rect x="609" y="54" width="22" height="22" fill="#1e293b" rx="4" stroke="#334155" stroke-width="1"/>
+      <text x="620" y="69" fill="#94a3b8" font-family="system-ui,sans-serif" font-size="11" text-anchor="middle">⊞</text>
+      <rect x="636" y="54" width="22" height="22" fill="#1e293b" rx="4" stroke="#334155" stroke-width="1"/>
+      <text x="647" y="69" fill="#94a3b8" font-family="system-ui,sans-serif" font-size="11" text-anchor="middle">⚙</text>
+      <!-- Thumbnails row 1 -->
+      <rect x="221" y="92" width="104" height="104" fill="#1e293b" rx="5"/>
+      <rect x="333" y="92" width="104" height="104" fill="#1e293b" rx="5"/>
+      <rect x="445" y="92" width="104" height="104" fill="#1e293b" rx="5"/>
+      <rect x="557" y="92" width="112" height="104" fill="#1e293b" rx="5"/>
+      <text x="273" y="150" fill="#334155" font-family="system-ui,sans-serif" font-size="34" text-anchor="middle">🌄</text>
+      <text x="385" y="150" fill="#334155" font-family="system-ui,sans-serif" font-size="34" text-anchor="middle">🏔</text>
+      <text x="497" y="150" fill="#334155" font-family="system-ui,sans-serif" font-size="34" text-anchor="middle">🍂</text>
+      <text x="613" y="150" fill="#334155" font-family="system-ui,sans-serif" font-size="34" text-anchor="middle">🌲</text>
+      <!-- Thumbnails row 2 (selected) -->
+      <rect x="221" y="204" width="104" height="104" fill="#1e293b" rx="5"/>
+      <rect x="333" y="204" width="104" height="104" fill="#1e293b" rx="5"/>
+      <rect x="445" y="204" width="104" height="104" fill="#172554" rx="5" stroke="#3b82f6" stroke-width="2"/>
+      <rect x="557" y="204" width="112" height="104" fill="#1e293b" rx="5"/>
+      <text x="273" y="262" fill="#334155" font-family="system-ui,sans-serif" font-size="34" text-anchor="middle">🌿</text>
+      <text x="385" y="262" fill="#334155" font-family="system-ui,sans-serif" font-size="34" text-anchor="middle">⛰</text>
+      <text x="497" y="262" fill="#3b82f6" font-family="system-ui,sans-serif" font-size="34" text-anchor="middle">🌅</text>
+      <text x="613" y="262" fill="#334155" font-family="system-ui,sans-serif" font-size="34" text-anchor="middle">🏕</text>
+      <!-- Thumbnails row 3 -->
+      <rect x="221" y="316" width="104" height="104" fill="#1e293b" rx="5"/>
+      <rect x="333" y="316" width="104" height="104" fill="#1e293b" rx="5"/>
+      <rect x="445" y="316" width="104" height="104" fill="#1e293b" rx="5"/>
+      <rect x="557" y="316" width="112" height="104" fill="#1e293b" rx="5"/>
+      <text x="273" y="374" fill="#334155" font-family="system-ui,sans-serif" font-size="34" text-anchor="middle">🌊</text>
+      <text x="385" y="374" fill="#334155" font-family="system-ui,sans-serif" font-size="34" text-anchor="middle">🌙</text>
+      <text x="497" y="374" fill="#334155" font-family="system-ui,sans-serif" font-size="34" text-anchor="middle">🌸</text>
+      <text x="613" y="374" fill="#334155" font-family="system-ui,sans-serif" font-size="34" text-anchor="middle">🏞</text>
+      <!-- Grid label -->
+      <rect x="213" y="428" width="464" height="32" fill="#0d1528"/>
+      <text x="445" y="445" fill="#3b82f6" font-family="system-ui,sans-serif" font-size="10" text-anchor="middle" font-weight="700">IMAGE GRID</text>
+      <text x="445" y="457" fill="#1e3a8a" font-family="system-ui,sans-serif" font-size="9" text-anchor="middle">ContentView › thumbnailGrid + imageGrid</text>
+      <!-- Divider -->
+      <rect x="677" y="46" width="1" height="414" fill="#334155"/>
+      <!-- RIGHT INSPECTOR -->
+      <rect x="678" y="46" width="222" height="382" fill="#1e293b"/>
+      <rect x="688" y="56" width="202" height="154" fill="#0f172a" rx="5"/>
+      <text x="789" y="142" fill="#1e3a8a" font-family="system-ui,sans-serif" font-size="56" text-anchor="middle">🌅</text>
+      <rect x="688" y="218" width="36" height="26" fill="#1e3a8a" rx="4"/>
+      <text x="706" y="236" fill="#fbbf24" font-family="system-ui,sans-serif" font-size="14" text-anchor="middle">★</text>
+      <rect x="730" y="218" width="36" height="26" fill="#374151" rx="4"/>
+      <text x="748" y="235" fill="#9ca3af" font-family="system-ui,sans-serif" font-size="11" text-anchor="middle">⧉</text>
+      <rect x="772" y="218" width="36" height="26" fill="#374151" rx="4"/>
+      <text x="790" y="235" fill="#9ca3af" font-family="system-ui,sans-serif" font-size="11" text-anchor="middle">📁</text>
+      <rect x="814" y="218" width="76" height="26" fill="#450a0a" rx="4"/>
+      <text x="852" y="235" fill="#fca5a5" font-family="system-ui,sans-serif" font-size="11" text-anchor="middle">🗑 Trash</text>
+      <text x="696" y="264" fill="#475569" font-family="system-ui,sans-serif" font-size="9" font-weight="700" letter-spacing="1">PROMPT</text>
+      <rect x="688" y="270" width="202" height="48" fill="#0f172a" rx="3"/>
+      <text x="696" y="284" fill="#94a3b8" font-family="system-ui,sans-serif" font-size="9">a breathtaking landscape at golden</text>
+      <text x="696" y="296" fill="#94a3b8" font-family="system-ui,sans-serif" font-size="9">hour, mountains, mist, cinematic...</text>
+      <line x1="688" y1="326" x2="890" y2="326" stroke="#334155" stroke-width="1"/>
+      <text x="696" y="342" fill="#475569" font-family="system-ui,sans-serif" font-size="9" font-weight="700" letter-spacing="1">MODEL</text>
+      <text x="696" y="356" fill="#e2e8f0" font-family="system-ui,sans-serif" font-size="11">SDXL 1.0</text>
+      <line x1="688" y1="368" x2="890" y2="368" stroke="#334155" stroke-width="1"/>
+      <text x="696" y="384" fill="#475569" font-family="system-ui,sans-serif" font-size="9" font-weight="700" letter-spacing="1">SAMPLER · STEPS · CFG</text>
+      <text x="696" y="398" fill="#e2e8f0" font-family="system-ui,sans-serif" font-size="11">DPM++ 2M  ·  30  ·  7.5</text>
+      <line x1="688" y1="410" x2="890" y2="410" stroke="#334155" stroke-width="1"/>
+      <text x="696" y="424" fill="#475569" font-family="system-ui,sans-serif" font-size="9" font-weight="700" letter-spacing="1">SEED</text>
+      <!-- Inspector label -->
+      <rect x="678" y="428" width="222" height="32" fill="#0d1528"/>
+      <text x="789" y="445" fill="#3b82f6" font-family="system-ui,sans-serif" font-size="10" text-anchor="middle" font-weight="700">INSPECTOR</text>
+      <text x="789" y="457" fill="#1e3a8a" font-family="system-ui,sans-serif" font-size="9" text-anchor="middle">ContentView › inspector</text>
+    </svg>
+    <div class="diagram-label">Fig 1 — The three-panel main window. Left sidebar shows folder tree and smart filters. Center grid shows image thumbnails (blue outline = selected). Right inspector shows the selected image with its AI generation recipe.</div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════ S3: ARCHITECTURE ═══════════════════════════ -->
+<section id="s3">
+  <h2><span class="num">3</span> Component Architecture</h2>
+  <p>Every box is a source file. Color shows the layer it belongs to. Arrows show which file depends on which — if A points to B, A relies on B.</p>
+  <div class="diagram">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 540">
+      <defs>
+        <marker id="arr" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#4b5563"/></marker>
+        <marker id="arr2" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#3b82f6"/></marker>
+      </defs>
+      <rect width="920" height="540" fill="#080c18" rx="10"/>
+      <!-- Layer bands -->
+      <rect x="6" y="8"   width="908" height="62" fill="#0d1528" rx="6"/>
+      <rect x="6" y="78"  width="908" height="62" fill="#0d0f2a" rx="6"/>
+      <rect x="6" y="148" width="908" height="62" fill="#100d28" rx="6"/>
+      <rect x="6" y="218" width="908" height="62" fill="#0d1420" rx="6"/>
+      <rect x="6" y="288" width="908" height="62" fill="#0d0d14" rx="6"/>
+      <rect x="6" y="358" width="908" height="62" fill="#0a0a0a" rx="6"/>
+      <!-- Layer labels -->
+      <text x="896" y="44"  fill="#1e3a8a" font-family="system-ui,sans-serif" font-size="9" text-anchor="end" font-weight="700" letter-spacing="1">ENTRY</text>
+      <text x="896" y="114" fill="#312e81" font-family="system-ui,sans-serif" font-size="9" text-anchor="end" font-weight="700" letter-spacing="1">INTERFACE</text>
+      <text x="896" y="184" fill="#4c1d95" font-family="system-ui,sans-serif" font-size="9" text-anchor="end" font-weight="700" letter-spacing="1">CORE LOGIC</text>
+      <text x="896" y="254" fill="#064e3b" font-family="system-ui,sans-serif" font-size="9" text-anchor="end" font-weight="700" letter-spacing="1">DATA + VIEWS</text>
+      <text x="896" y="324" fill="#1e1b4b" font-family="system-ui,sans-serif" font-size="9" text-anchor="end" font-weight="700" letter-spacing="1">PARSERS</text>
+      <text x="896" y="394" fill="#374151" font-family="system-ui,sans-serif" font-size="9" text-anchor="end" font-weight="700" letter-spacing="1">FOUNDATION</text>
+      <!-- ENTRY: TagBrowserApp -->
+      <rect x="330" y="16" width="220" height="46" fill="#1e3a8a" rx="6"/>
+      <text x="440" y="36" fill="#eff6ff" font-family="system-ui,sans-serif" font-size="12" text-anchor="middle" font-weight="700">TagBrowserApp</text>
+      <text x="440" y="52" fill="#93c5fd" font-family="system-ui,sans-serif" font-size="9" text-anchor="middle">app entry · menus · window setup</text>
+      <!-- INTERFACE: ContentView -->
+      <rect x="60" y="86" width="700" height="46" fill="#312e81" rx="6"/>
+      <text x="410" y="107" fill="#eff6ff" font-family="system-ui,sans-serif" font-size="12" text-anchor="middle" font-weight="700">ContentView</text>
+      <text x="410" y="122" fill="#a5b4fc" font-family="system-ui,sans-serif" font-size="9" text-anchor="middle">entire main window — sidebar · grid · inspector · search · keyboard handling  (~2700 lines)</text>
+      <!-- CORE LOGIC -->
+      <rect x="14" y="156" width="194" height="46" fill="#4c1d95" rx="6"/>
+      <text x="111" y="176" fill="#ede9fe" font-family="system-ui,sans-serif" font-size="11" text-anchor="middle" font-weight="700">LibraryStore</text>
+      <text x="111" y="191" fill="#c4b5fd" font-family="system-ui,sans-serif" font-size="9" text-anchor="middle">brain · state · scanning · search</text>
+      <rect x="226" y="156" width="160" height="46" fill="#064e3b" rx="6"/>
+      <text x="306" y="176" fill="#ecfdf5" font-family="system-ui,sans-serif" font-size="11" text-anchor="middle" font-weight="700">LibraryProfile</text>
+      <text x="306" y="191" fill="#6ee7b7" font-family="system-ui,sans-serif" font-size="9" text-anchor="middle">search · folder naming</text>
+      <rect x="404" y="156" width="216" height="46" fill="#78350f" rx="6"/>
+      <text x="512" y="176" fill="#fef3c7" font-family="system-ui,sans-serif" font-size="11" text-anchor="middle" font-weight="700">PreviewOverlayController</text>
+      <text x="512" y="191" fill="#fcd34d" font-family="system-ui,sans-serif" font-size="9" text-anchor="middle">fullscreen preview · keyboard · window</text>
+      <rect x="638" y="156" width="210" height="46" fill="#78350f" rx="6"/>
+      <text x="743" y="176" fill="#fef3c7" font-family="system-ui,sans-serif" font-size="11" text-anchor="middle" font-weight="700">SlideshowWindowController</text>
+      <text x="743" y="191" fill="#fcd34d" font-family="system-ui,sans-serif" font-size="9" text-anchor="middle">slideshow · timer · shuffle · prefetch</text>
+      <!-- DATA + VIEWS -->
+      <rect x="14" y="226" width="194" height="46" fill="#1e3a5f" rx="6"/>
+      <text x="111" y="246" fill="#eff6ff" font-family="system-ui,sans-serif" font-size="11" text-anchor="middle" font-weight="700">MetadataIndex</text>
+      <text x="111" y="261" fill="#7dd3fc" font-family="system-ui,sans-serif" font-size="9" text-anchor="middle">SQLite database · fast queries</text>
+      <rect x="226" y="226" width="160" height="46" fill="#064e3b" rx="6"/>
+      <text x="306" y="246" fill="#ecfdf5" font-family="system-ui,sans-serif" font-size="11" text-anchor="middle" font-weight="700">SafeImageLoader</text>
+      <text x="306" y="261" fill="#6ee7b7" font-family="system-ui,sans-serif" font-size="9" text-anchor="middle">thumbnails · safety limits · cache</text>
+      <rect x="404" y="226" width="216" height="46" fill="#92400e" rx="6"/>
+      <text x="512" y="246" fill="#fef3c7" font-family="system-ui,sans-serif" font-size="11" text-anchor="middle" font-weight="700">PreviewOverlayView</text>
+      <text x="512" y="261" fill="#fcd34d" font-family="system-ui,sans-serif" font-size="9" text-anchor="middle">fullscreen visuals · scaling · controls</text>
+      <rect x="638" y="226" width="210" height="46" fill="#92400e" rx="6"/>
+      <text x="743" y="246" fill="#fef3c7" font-family="system-ui,sans-serif" font-size="11" text-anchor="middle" font-weight="700">SlideshowRootView</text>
+      <text x="743" y="261" fill="#fcd34d" font-family="system-ui,sans-serif" font-size="9" text-anchor="middle">slideshow visuals · HUD · key handling</text>
+      <!-- PARSERS -->
+      <rect x="14" y="296" width="190" height="46" fill="#1e1b4b" rx="6"/>
+      <text x="109" y="316" fill="#e0e7ff" font-family="system-ui,sans-serif" font-size="11" text-anchor="middle" font-weight="700">PNGInfoReader</text>
+      <text x="109" y="331" fill="#a5b4fc" font-family="system-ui,sans-serif" font-size="9" text-anchor="middle">A1111 · ComfyUI · DrawThings</text>
+      <rect x="218" y="296" width="190" height="46" fill="#1e1b4b" rx="6"/>
+      <text x="313" y="316" fill="#e0e7ff" font-family="system-ui,sans-serif" font-size="11" text-anchor="middle" font-weight="700">JpegMetadataReader</text>
+      <text x="313" y="331" fill="#a5b4fc" font-family="system-ui,sans-serif" font-size="9" text-anchor="middle">JPEG EXIF · TIFF fallback</text>
+      <rect x="422" y="296" width="210" height="46" fill="#1e1b4b" rx="6"/>
+      <text x="527" y="316" fill="#e0e7ff" font-family="system-ui,sans-serif" font-size="11" text-anchor="middle" font-weight="700">FolderMetadataReader</text>
+      <text x="527" y="331" fill="#a5b4fc" font-family="system-ui,sans-serif" font-size="9" text-anchor="middle">JSON · CFG · sidecar .txt files</text>
+      <!-- FOUNDATION -->
+      <rect x="14" y="366" width="150" height="46" fill="#1f2937" rx="6"/>
+      <text x="89" y="386" fill="#f9fafb" font-family="system-ui,sans-serif" font-size="11" text-anchor="middle" font-weight="700">Models</text>
+      <text x="89" y="401" fill="#9ca3af" font-family="system-ui,sans-serif" font-size="9" text-anchor="middle">data blueprints</text>
+      <rect x="180" y="366" width="160" height="46" fill="#1f2937" rx="6"/>
+      <text x="260" y="386" fill="#f9fafb" font-family="system-ui,sans-serif" font-size="11" text-anchor="middle" font-weight="700">AppSettings</text>
+      <text x="260" y="401" fill="#9ca3af" font-family="system-ui,sans-serif" font-size="9" text-anchor="middle">mode preference</text>
+      <rect x="356" y="366" width="200" height="46" fill="#1f2937" rx="6"/>
+      <text x="456" y="386" fill="#f9fafb" font-family="system-ui,sans-serif" font-size="11" text-anchor="middle" font-weight="700">SlideshowSettings</text>
+      <text x="456" y="401" fill="#9ca3af" font-family="system-ui,sans-serif" font-size="9" text-anchor="middle">all slideshow preferences</text>
+      <rect x="572" y="366" width="180" height="46" fill="#1f2937" rx="6"/>
+      <text x="662" y="386" fill="#f9fafb" font-family="system-ui,sans-serif" font-size="11" text-anchor="middle" font-weight="700">WindowReader</text>
+      <text x="662" y="401" fill="#9ca3af" font-family="system-ui,sans-serif" font-size="9" text-anchor="middle">keyboard · window bridges</text>
+      <rect x="768" y="366" width="144" height="46" fill="#1f2937" rx="6"/>
+      <text x="840" y="386" fill="#f9fafb" font-family="system-ui,sans-serif" font-size="11" text-anchor="middle" font-weight="700">SlideshowCoordinator</text>
+      <text x="840" y="401" fill="#9ca3af" font-family="system-ui,sans-serif" font-size="9" text-anchor="middle">launch signal</text>
+      <!-- ARROWS -->
+      <line x1="440" y1="62" x2="440" y2="86" stroke="#4b5563" stroke-width="1.5" marker-end="url(#arr)"/>
+      <line x1="370" y1="62" x2="200" y2="156" stroke="#4b5563" stroke-width="1.5" marker-end="url(#arr)"/>
+      <line x1="140" y1="132" x2="111" y2="156" stroke="#3b82f6" stroke-width="2" marker-end="url(#arr2)"/>
+      <line x1="500" y1="132" x2="512" y2="156" stroke="#4b5563" stroke-width="1.5" marker-end="url(#arr)"/>
+      <line x1="690" y1="132" x2="725" y2="156" stroke="#4b5563" stroke-width="1.5" marker-end="url(#arr)"/>
+      <line x1="111" y1="202" x2="111" y2="226" stroke="#4b5563" stroke-width="1.5" marker-end="url(#arr)"/>
+      <line x1="208" y1="179" x2="226" y2="179" stroke="#4b5563" stroke-width="1.5" marker-end="url(#arr)"/>
+      <line x1="80"  y1="272" x2="80"  y2="296" stroke="#4b5563" stroke-width="1.5" marker-end="url(#arr)"/>
+      <line x1="140" y1="272" x2="250" y2="296" stroke="#4b5563" stroke-width="1.5" marker-end="url(#arr)"/>
+      <line x1="165" y1="272" x2="450" y2="296" stroke="#4b5563" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#arr)"/>
+      <line x1="512" y1="202" x2="512" y2="226" stroke="#4b5563" stroke-width="1.5" marker-end="url(#arr)"/>
+      <line x1="743" y1="202" x2="743" y2="226" stroke="#4b5563" stroke-width="1.5" marker-end="url(#arr)"/>
+      <line x1="462" y1="249" x2="386" y2="249" stroke="#4b5563" stroke-width="1.5" marker-end="url(#arr)"/>
+      <line x1="640" y1="168" x2="440" y2="226" stroke="#4b5563" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#arr)"/>
+      <!-- Legend -->
+      <rect x="14" y="468" width="680" height="56" fill="#0d0d14" rx="6"/>
+      <text x="26" y="484" fill="#6b7280" font-family="system-ui,sans-serif" font-size="10" font-weight="700">KEY:</text>
+      <line x1="58" y1="480" x2="98" y2="480" stroke="#4b5563" stroke-width="1.5" marker-end="url(#arr)"/>
+      <text x="106" y="484" fill="#6b7280" font-family="system-ui,sans-serif" font-size="10">depends on / calls</text>
+      <line x1="240" y1="480" x2="280" y2="480" stroke="#3b82f6" stroke-width="2" marker-end="url(#arr2)"/>
+      <text x="288" y="484" fill="#6b7280" font-family="system-ui,sans-serif" font-size="10">observes (auto-redraws on change)</text>
+      <line x1="470" y1="480" x2="510" y2="480" stroke="#4b5563" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#arr)"/>
+      <text x="518" y="484" fill="#6b7280" font-family="system-ui,sans-serif" font-size="10">indirect / async call</text>
+      <text x="26" y="514" fill="#4b5563" font-family="system-ui,sans-serif" font-size="9">Dependency flows downward through the layers. The blue arrow is special: SwiftUI automatically redraws ContentView whenever LibraryStore data changes — no manual refresh needed.</text>
+    </svg>
+    <div class="diagram-label">Fig 2 — Component architecture. Six layers from app entry (top) down to foundation (bottom). Arrows show dependency direction.</div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════ S4: THREE-SPEED DATA ═══════════════════════════ -->
+<section id="s4">
+  <h2><span class="num">4</span> Three-Speed Data Model</h2>
+  <p>The app uses three layers of storage with very different access speeds. The right layer is chosen for each task automatically — this is what makes browsing feel instant even with large libraries.</p>
+  <div class="diagram">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 860 380">
+      <rect width="860" height="380" fill="#080c18" rx="10"/>
+      <text x="22" y="74"  fill="#22c55e" font-family="system-ui,sans-serif" font-size="11" font-weight="700">INSTANT</text>
+      <text x="22" y="87"  fill="#22c55e" font-family="system-ui,sans-serif" font-size="9">0 ms</text>
+      <text x="22" y="184" fill="#f59e0b" font-family="system-ui,sans-serif" font-size="11" font-weight="700">FAST</text>
+      <text x="22" y="197" fill="#f59e0b" font-family="system-ui,sans-serif" font-size="9">&lt; 50 ms</text>
+      <text x="22" y="294" fill="#ef4444" font-family="system-ui,sans-serif" font-size="11" font-weight="700">SLOW</text>
+      <text x="22" y="307" fill="#ef4444" font-family="system-ui,sans-serif" font-size="9">seconds</text>
+      <!-- Layer 1 -->
+      <rect x="90" y="26" width="752" height="100" fill="#052e16" rx="8" stroke="#16a34a" stroke-width="1.5"/>
+      <text x="466" y="52" fill="#bbf7d0" font-family="system-ui,sans-serif" font-size="14" text-anchor="middle" font-weight="700">Layer 1 — In-Memory (LibraryStore)</text>
+      <text x="466" y="70" fill="#86efac" font-family="system-ui,sans-serif" font-size="10" text-anchor="middle">Folder tree · image lists · favorites · smart filter results · current selection</text>
+      <text x="466" y="86" fill="#4ade80" font-family="system-ui,sans-serif" font-size="9" text-anchor="middle">Lives in RAM. Populated when a folder is opened. Always up to date. Gone when the app quits.</text>
+      <text x="466" y="102" fill="#4ade80" font-family="system-ui,sans-serif" font-size="9" text-anchor="middle">Used for: browsing folders · clicking images · favorites · sidebar navigation    File: LibraryStore.swift</text>
+      <!-- Layer 2 -->
+      <rect x="90" y="136" width="752" height="100" fill="#1c1400" rx="8" stroke="#d97706" stroke-width="1.5"/>
+      <text x="466" y="162" fill="#fef3c7" font-family="system-ui,sans-serif" font-size="14" text-anchor="middle" font-weight="700">Layer 2 — SQLite Database (MetadataIndex)</text>
+      <text x="466" y="180" fill="#fde68a" font-family="system-ui,sans-serif" font-size="10" text-anchor="middle">One row per image: path · model · sampler · scheduler · steps · CFG · seed · prompt · negative prompt</text>
+      <text x="466" y="196" fill="#fbbf24" font-family="system-ui,sans-serif" font-size="9" text-anchor="middle">Persists to disk at ~/Library/Application Support/AiGallery/. Survives restarts. Built in background after folder opens.</text>
+      <text x="466" y="212" fill="#fbbf24" font-family="system-ui,sans-serif" font-size="9" text-anchor="middle">Used for: search · filter dropdowns · smart filters · kin matching    File: MetadataIndex.swift</text>
+      <!-- Layer 3 -->
+      <rect x="90" y="246" width="752" height="100" fill="#1a0505" rx="8" stroke="#dc2626" stroke-width="1.5"/>
+      <text x="466" y="272" fill="#fee2e2" font-family="system-ui,sans-serif" font-size="14" text-anchor="middle" font-weight="700">Layer 3 — Image Files on Disk</text>
+      <text x="466" y="290" fill="#fca5a5" font-family="system-ui,sans-serif" font-size="10" text-anchor="middle">The actual PNG / JPG / WEBP files, each potentially containing embedded AI generation metadata.</text>
+      <text x="466" y="306" fill="#f87171" font-family="system-ui,sans-serif" font-size="9" text-anchor="middle">Read once per file (or when the file is modified). Parsed by PNGInfoReader / JpegMetadataReader / FolderMetadataReader.</text>
+      <text x="466" y="322" fill="#f87171" font-family="system-ui,sans-serif" font-size="9" text-anchor="middle">Used for: initial indexing · inspector display · thumbnail rendering</text>
+      <text x="466" y="338" fill="#f87171" font-family="system-ui,sans-serif" font-size="9" text-anchor="middle">Files: PNGInfoReader.swift · JpegMetadataReader.swift · FolderMetadataReader.swift</text>
+      <!-- Connectors -->
+      <line x1="466" y1="126" x2="466" y2="136" stroke="#6b7280" stroke-width="2" stroke-dasharray="4,3"/>
+      <text x="530" y="134" fill="#4b5563" font-family="system-ui,sans-serif" font-size="9">query results flow up</text>
+      <line x1="466" y1="236" x2="466" y2="246" stroke="#6b7280" stroke-width="2" stroke-dasharray="4,3"/>
+      <text x="530" y="244" fill="#4b5563" font-family="system-ui,sans-serif" font-size="9">parsed metadata written to DB on first scan</text>
+      <!-- Speed bar -->
+      <rect x="852" y="26"  width="6" height="100" fill="#22c55e" rx="3"/>
+      <rect x="852" y="136" width="6" height="100" fill="#f59e0b" rx="3"/>
+      <rect x="852" y="246" width="6" height="100" fill="#ef4444" rx="3"/>
+    </svg>
+    <div class="diagram-label">Fig 3 — The three-speed data architecture. Green = instant RAM access. Amber = fast SQLite queries. Red = slow file reads (only during initial scan).</div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════ S5: DATA TYPES ═══════════════════════════ -->
+<section id="s5">
+  <h2><span class="num">5</span> Core Data Types</h2>
+  <p>Defined in <code>Models.swift</code>. These are the fundamental "blueprints" for data throughout the entire app.</p>
+  <div class="type-grid">
+    <div class="type-card">
+      <div class="type-name">Category</div>
+      <div class="type-desc">A folder — or a synthetic group like Favorites or Smart Filters.</div>
+      <div class="type-fields">
+        <span>id — unique identifier (path-based)</span>
+        <span>folderURL — location on disk</span>
+        <span>displayName — what appears in the sidebar</span>
+        <span>images[] — array of ImageItems</span>
+      </div>
+    </div>
+    <div class="type-card">
+      <div class="type-name">ImageItem</div>
+      <div class="type-desc">One image file. The basic unit the grid works with.</div>
+      <div class="type-fields">
+        <span>id — unique identifier (file path)</span>
+        <span>url — full path on disk</span>
+        <span>displayLabel — filename for the grid</span>
+        <span>creationDate — file creation date</span>
+      </div>
+    </div>
+    <div class="type-card">
+      <div class="type-name">ImageMetadata</div>
+      <div class="type-desc">The AI "recipe" embedded in an image — the prompt, settings, and parameters used to generate it.</div>
+      <div class="type-fields">
+        <span>prompt — what the user asked for</span>
+        <span>negativePrompt — what to avoid</span>
+        <span>generationParameters[] — model, seed, steps…</span>
+        <span>textEntries[] — all other embedded text</span>
+      </div>
+    </div>
+    <div class="type-card">
+      <div class="type-name">SmartFilter</div>
+      <div class="type-desc">A saved, named search query that appears in the sidebar.</div>
+      <div class="type-fields">
+        <span>id — UUID</span>
+        <span>name — display label</span>
+        <span>query — search string</span>
+        <span>scopeFolderURL? — optional folder scope</span>
+      </div>
+    </div>
+    <div class="type-card">
+      <div class="type-name">MetadataField</div>
+      <div class="type-desc">One metadata column. Used to populate the filter bar dropdowns.</div>
+      <div class="type-fields">
+        <span>.model — the AI model used</span>
+        <span>.sampler — the sampler algorithm</span>
+        <span>.scheduler — the scheduler</span>
+        <span>.vae — the VAE model</span>
+        <span>.upscaler — the upscaler used</span>
+      </div>
+    </div>
+    <div class="type-card">
+      <div class="type-name">MetadataFilter</div>
+      <div class="type-desc">"Show only images where Field = Value." Applied via the filter bar.</div>
+      <div class="type-fields">
+        <span>field — which MetadataField to filter on</span>
+        <span>value — the exact value to match</span>
+      </div>
+    </div>
+  </div>
+  <div class="callout" style="margin-top:24px">
+    <strong>Data flow from disk to screen:</strong><br>
+    File on disk → parsed by PNGInfoReader → <code>ImageMetadata</code> → stored in MetadataIndex as a row → queried back as <code>ImageItem</code> paths → wrapped in a <code>Category</code> → displayed by ContentView.
+  </div>
+</section>
+
+<!-- ═══════════════════════════ S6: FEATURE LOOPS ═══════════════════════════ -->
+<section id="s6">
+  <h2><span class="num">6</span> Feature Loops &amp; Function Maps</h2>
+  <p>Each loop below shows exactly which functions are called, in what order, when you perform that action. Indentation shows nesting — what calls what. <code>←</code> annotations explain the "why."</p>
+
+  <!-- 6.1 Startup -->
+  <h3 id="s6-startup">6.1 — App Startup</h3>
+  <div class="loop-section">
+    <div class="loop-header"><span class="loop-icon">🚀</span><span class="loop-title">App launch sequence</span><span class="loop-trigger">TagBrowserApp.swift</span></div>
+    <div class="loop-body"><pre>TagBrowserApp.body                        ← App framework calls this first
+  ├─ applicationDidFinishLaunching        ← macOS calls on launch
+  ├─ applicationDidBecomeActive           ← macOS calls when window comes forward
+  └─ LibraryStore.init                    ← Creates the central data manager
+        ├─ loadGlobalSmartFilters         ← Restores saved searches from disk
+        └─ performInitialLoad             ← Async startup task
+              ├─ buildLibrary             ← Scans root folder tree
+              │     └─ discoverCategoryFolders
+              │           └─ loadImages   ← Finds all images in each subfolder
+              ├─ pruneFavoritesToExistingImages  ← Removes stale favorites
+              ├─ rebuildCategories        ← Assembles sidebar category list
+              ├─ validCategoryID          ← Restores last-selected folder
+              ├─ validImageID             ← Restores last-selected image
+              └─ startBackgroundIndexing  ← Kicks off metadata scan (does NOT block UI)
+
+ContentView appears on screen
+  ├─ expandAllGroupsIfNeeded             ← Expands sidebar if nothing expanded yet
+  └─ pushExcludedPaths                   ← Applies any hidden-folder settings</pre></div>
+  </div>
+
+  <!-- 6.2 Folder Browsing -->
+  <h3 id="s6-browsing">6.2 — Folder Browsing</h3>
+  <div class="loop-section">
+    <div class="loop-header"><span class="loop-icon">📁</span><span class="loop-title">User clicks a folder in the sidebar</span><span class="loop-trigger">ContentView › sidebar</span></div>
+    <div class="loop-body"><pre>sidebar → sidebarGroupHeader / sidebarNodeRow → categoryRow
+  ├─ clearSearch                         ← Wipes any active search text
+  ├─ clearDroppedInspection              ← Removes any drag-inspected image
+  ├─ clearMultiSelection                 ← Deselects multi-selected images
+  ├─ endDiffMode                         ← Closes comparison view if open
+  └─ library.selectCategory              ← Tells LibraryStore which folder to show
+        └─ persistSelectedCategoryID     ← Saves choice to disk for next launch
+  → [UI redraws automatically — no manual call needed]
+        ├─ thumbnailGrid                 ← Re-renders with this folder's images
+        └─ displayImages
+              └─ sortedImages            ← Applies current sort order</pre></div>
+  </div>
+  <div class="loop-section">
+    <div class="loop-header"><span class="loop-icon">🖼</span><span class="loop-title">User clicks an image thumbnail</span><span class="loop-trigger">ContentView › imageGrid</span></div>
+    <div class="loop-body"><pre>imageGrid → handleThumbnailTap
+  ├─ (Cmd+click)   → handleCmdClick     ← Toggle image in/out of multi-selection
+  ├─ (Shift+click) → handleShiftClick   ← Range-select from anchor to target
+  └─ (plain click) → selectImage
+        ├─ relinquishSearchFocus         ← Move cursor out of search box
+        ├─ clearDroppedInspection        ← Remove dragged-in inspection image
+        └─ library.selectImage           ← Sets selectedImageID in LibraryStore
+  → [inspector panel redraws]
+        └─ inspector
+              ├─ library.inspectorMetadata   ← Reads this image's metadata
+              │     ├─ embeddedMetadata      ← PNG/JPEG embedded chunks (primary)
+              │     │     └─ PNGInfoReader.read / JpegMetadataReader.read
+              │     ├─ sidecarMetadata       ← .txt file next to image (fallback 1)
+              │     └─ folderMetadata        ← folder JSON/CFG file (fallback 2)
+              ├─ inspectorPreview            ← Displays image thumbnail
+              ├─ imageActionStrip            ← ★ ⧉ 📁 🗑 action buttons
+              └─ promptsCard                 ← Prompt + negative prompt text</pre></div>
+  </div>
+  <div class="loop-section">
+    <div class="loop-header"><span class="loop-icon">⌨️</span><span class="loop-title">User presses arrow keys to navigate</span><span class="loop-trigger">ContentView › handleKeyEvent</span></div>
+    <div class="loop-body"><pre>handleKeyEvent → handleNavigationHotkey
+  ├─ shouldHandleNavigationHotkey        ← Guard: is focus NOT in a text field?
+  └─ moveSelection
+        ├─ selectImage                   ← Moves to next / previous image
+        └─ [scroll view auto-scrolls to keep image visible]</pre></div>
+  </div>
+
+  <!-- 6.3 Indexing -->
+  <h3 id="s6-indexing">6.3 — Background Indexing</h3>
+  <div class="callout">Runs automatically after any folder is opened. Happens entirely in the background — the UI stays fully responsive while it runs.</div>
+  <div class="loop-section">
+    <div class="loop-header"><span class="loop-icon">⚙️</span><span class="loop-title">Background metadata scan</span><span class="loop-trigger">LibraryStore › startBackgroundIndexing</span></div>
+    <div class="loop-body"><pre>LibraryStore.startBackgroundIndexing
+  ├─ MetadataIndex.init                  ← Opens or creates the SQLite file on disk
+  │     └─ createSchema                  ← Creates table + columns if not existing;
+  │                                          migrates schema if new columns were added
+  └─ MetadataIndex.scan                  ← Main indexing loop
+        └─ (for each image file)
+              ├─ fileModDate             ← Has this file changed since last scan?
+              │     (unchanged → skip, changed/new → read it)
+              └─ extractRow              ← Parse and normalize the image's metadata
+                    ├─ PNGInfoReader.read / JpegMetadataReader.read
+                    ├─ MetadataReader.readSidecar   ← check .txt sidecar file
+                    ├─ normalizeModelName  ← strips hashes [abc123], -fp16 etc.
+                    └─ splitA1111Sampler  ← splits "DPM++ 2M Karras" → sampler + scheduler
+              └─ bind → SQL INSERT/UPDATE ← writes row to database
+        └─ removePaths                   ← Deletes rows for files that no longer exist
+        → [progress bar updates every 100 files]
+  ├─ resolveSmartFilters                 ← Re-runs all saved searches against new data
+  └─ rebuildCategories                   ← Updates UI (smart filter rows, etc.)</pre></div>
+  </div>
+
+  <!-- 6.4 Search -->
+  <h3 id="s6-search">6.4 — Search</h3>
+  <div class="loop-section">
+    <div class="loop-header"><span class="loop-icon">🔍</span><span class="loop-title">User types in the search box</span><span class="loop-trigger">ContentView › toolbarSearchField</span></div>
+    <div class="loop-body"><pre>toolbarSearchField (user types)
+  └─ handleSearchTextChange              ← Fires 180ms after typing pauses
+        ├─ clearMultiSelection
+        └─ library.searchWithMetadata    ← The main search engine
+              ├─ parseSearchQuery        ← Parses "portrait -dark" into:
+              │                               required: ["portrait"], excluded: ["dark"]
+              │                               quoted phrases counted as one term
+              ├─ GeneralLibraryProfile.search  ← Filename matching (fast, in-memory)
+              │     └─ searchImages      ← Ranks: exact match → starts-with → contains
+              ├─ metadataPaths           ← SQLite queries, one per search term
+              │     ├─ MetadataIndex.imagePaths(where:contains:)   ← field LIKE %term%
+              │     └─ MetadataIndex.imagePathsWherePromptContains ← prompt + neg prompt
+              └─ [results merged, deduplicated, sorted by rank]
+        → [activeSearchResults updated → grid redraws with results]
+        └─ restoreBrowseSelection        ← (if search cleared) returns to folder view
+
+saveSearchButton → library.addSmartFilter
+  ├─ persistSmartFilters                 ← Saves to UserDefaults (survives restart)
+  └─ resolveSmartFilters                 ← Runs the query immediately
+        ├─ searchWithMetadata            ← Same engine as above
+        └─ rebuildCategories             ← Adds Smart Filter row to sidebar</pre></div>
+  </div>
+
+  <!-- 6.5 Metadata Filters -->
+  <h3 id="s6-filters">6.5 — Metadata Filter Bar</h3>
+  <div class="loop-section">
+    <div class="loop-header"><span class="loop-icon">🏷</span><span class="loop-title">Filter bar dropdown interaction</span><span class="loop-trigger">ContentView › filterBar</span></div>
+    <div class="loop-body"><pre>thumbnailGrid (on appear / folder change)
+  └─ loadFacetValues                     ← "How many images per model/sampler value?"
+        └─ library.facetValues
+              └─ MetadataIndex.facetValues  ← SQL: SELECT value, COUNT(*) GROUP BY value
+
+filterBar (user picks "Model = SDXL" from dropdown)
+  └─ library.setMetadataFilter           ← Records the filter
+        ├─ applyMetadataFilters           ← Runs the SQL query
+        │     └─ MetadataIndex.imagePaths(matching:)  ← WHERE model = 'SDXL'
+        └─ rebuildCategories             ← Creates __filtered__ synthetic category
+  → [sidebar shows "Filtered" row; grid shows matching images only]
+
+filterBar (user clears a filter)
+  └─ library.removeMetadataFilter / clearMetadataFilters
+        ├─ applyMetadataFilters          ← Re-runs with remaining active filters
+        └─ rebuildCategories</pre></div>
+  </div>
+
+  <!-- 6.6 Preview -->
+  <h3 id="s6-preview">6.6 — Fullscreen Preview</h3>
+  <div class="loop-section">
+    <div class="loop-header"><span class="loop-icon">🔎</span><span class="loop-title">Open, navigate, and close the fullscreen preview</span><span class="loop-trigger">Double-click or Space bar</span></div>
+    <div class="loop-body"><pre>imageGrid (double-click, or Space key)
+  └─ openPreview / handlePreviewHotkey → togglePreview → presentPreview
+        └─ schedulePreviewPresentation
+              ├─ previewOverlaySession    ← Builds data package:
+              │     ├─ library.inspectorMetadata  ← metadata for this image
+              │     ├─ library.isFavorite         ← is it starred?
+              │     └─ callbacks: onNavigate, onToggleFavorite, onTrash, onSlideshow
+              └─ previewController.present
+                    └─ PreviewOverlayController.show
+                          ├─ targetFrame           ← Positions panel over main window
+                          ├─ makeView              ← Creates PreviewOverlayView
+                          └─ installObservers      ← Window focus + key event listeners
+
+PreviewOverlayView (what user sees)
+  └─ previewSurface
+        ├─ PreviewOverlayImage           ← SafeImageLoader.loadImage (scaled to screen)
+        ├─ previewControls               ← ◀ ★ ▶ buttons
+        └─ dynamicMetrics               ← Scales sizes to screen resolution
+
+User presses keys inside preview
+  ├─ ←/→  → session.onNavigate → handlePreviewNavigation → moveSelection
+  │               (also moves the grid selection in sync)
+  ├─ F    → session.onToggleFavorite → library.toggleFavorite
+  ├─ Del  → session.onTrash → trashFromViewer
+  │               ├─ library.trashImage
+  │               ├─ removeDeletedFromSearch
+  │               └─ previewController.dismiss  (if no images remain)
+  ├─ P    → cycleOverlayPreset           ← Cycles info overlay style
+  ├─ Esc/Space → previewController.dismiss
+  └─ ▶ button  → session.onSlideshow → launchSlideshow</pre></div>
+  </div>
+
+  <!-- 6.7 Slideshow -->
+  <h3 id="s6-slideshow">6.7 — Slideshow</h3>
+  <div class="loop-section">
+    <div class="loop-header"><span class="loop-icon">▶️</span><span class="loop-title">Launch, run, and close the slideshow</span><span class="loop-trigger">Menu · toolbar button · preview overlay</span></div>
+    <div class="loop-body"><pre>Menu "Start Slideshow" (or button in grid toolbar)
+  └─ SlideshowCoordinator.requestLaunch  ← Sets a flag (tiny relay object)
+  └─ ContentView.launchSlideshow         ← Responds to the flag change
+        ├─ previewController.dismiss     ← Closes fullscreen preview if open
+        └─ SlideshowWindowController.present
+              ├─ shuffled                ← Fisher-Yates shuffle if random mode
+              ├─ syncViewModel           ← Sets first image in the view model
+              ├─ SafeImageLoader.loadImageAsync  ← Loads first image
+              ├─ scheduleTimer           ← Starts the N-second auto-advance timer
+              └─ prefetchNext            ← Loads next image in background (smooth transitions)
+
+Timer fires every N seconds
+  └─ SlideshowWindowController.advance
+        ├─ nextIndex                     ← Calculates next position (shuffle-aware)
+        ├─ syncViewModel                 ← Updates display to new image
+        ├─ prefetchNext                  ← Pre-loads the one after that
+        └─ scheduleTimer                 ← Reschedules (keeps loop running)
+
+User presses keys during slideshow
+  └─ SlideshowRootView.handleKey
+        ├─ ← / →  → retreat / advance   ← Manual navigation (resets timer)
+        ├─ Space  → togglePause          ← Pause / resume timer
+        ├─ F      → toggleFavorite       ← Star the current image
+        ├─ P      → cycleOverlayPreset   ← Cycle metadata overlay style
+        └─ Esc    → dismiss              ← Close slideshow
+
+Slideshow closes (Esc, window close, or exits fullscreen)
+  └─ SlideshowWindowController.cleanup
+        ├─ stopTimer
+        ├─ cancel prefetch task
+        └─ [returns focus to the main window]</pre></div>
+  </div>
+
+  <!-- 6.8 Thumbnails -->
+  <h3 id="s6-thumbnails">6.8 — Thumbnail Loading</h3>
+  <div class="loop-section">
+    <div class="loop-header"><span class="loop-icon">⚡</span><span class="loop-title">Loading thumbnails as you scroll</span><span class="loop-trigger">SafeImageLoader.swift — runs per visible cell</span></div>
+    <div class="loop-body"><pre>imageGrid (each ThumbnailCell scrolls into view)
+  └─ SafeImageLoader.loadImageAsync
+        ├─ cachedImage                   ← Check memory cache (returns instantly if hit)
+        ├─ ThumbnailLoadGate.acquire     ← Wait for an open slot (max 4 simultaneous loads)
+        │     └─ Task.checkCancellation  ← Bail if cell scrolled away while waiting
+        └─ SafeImageLoader.loadImage
+              ├─ imagePixelSize          ← Reads image dimensions only (no pixel data yet)
+              ├─ [Safety: reject if &gt;256MB file size or &gt;70 megapixels]
+              ├─ [Safety: reject if dimensions are nonsensical]
+              └─ [Create scaled NSImage thumbnail at requested size]
+        └─ ThumbnailLoadGate.release     ← Free the slot; next queued load starts
+  → [ThumbnailCell redraws with the loaded image]</pre></div>
+  </div>
+
+  <!-- 6.9 Drag-drop -->
+  <h3 id="s6-dragdrop">6.9 — Drag-and-Drop Inspection</h3>
+  <div class="loop-section">
+    <div class="loop-header"><span class="loop-icon">📂</span><span class="loop-title">Drag any PNG onto the app to inspect it</span><span class="loop-trigger">ContentView › .onDrop</span></div>
+    <div class="loop-body"><pre>User drags a PNG file onto the app window
+  └─ ContentView.body (.onDrop)
+        └─ handleDroppedFileProviders
+              └─ loadFirstDroppedPNG     ← Recursively finds the first PNG in the drop
+                    └─ openDroppedInspection
+                          ├─ library.temporaryInspectionImage  ← Makes a lightweight ImageItem
+                          ├─ relinquishSearchFocus
+                          └─ syncPreviewSession  ← Updates preview overlay if open
+  → [Inspector shows the dropped image with a "Return to Library" banner at the top]
+
+User clicks "Return to Library" in the banner
+  └─ ContentView.clearDroppedInspection
+        └─ syncPreviewSession            ← Restores preview to the library's selection</pre></div>
+  </div>
+
+  <!-- 6.10 Kin -->
+  <h3 id="s6-kin">6.10 — Kin (Related Images) Mode</h3>
+  <div class="loop-section">
+    <div class="loop-header"><span class="loop-icon">🔗</span><span class="loop-title">Find images related to the selected one</span><span class="loop-trigger">ContentView › kinButton</span></div>
+    <div class="loop-body"><pre>kinButton (user clicks, in grid toolbar)
+  └─ [isKinActive toggled on]
+  └─ thumbnailGrid
+        └─ kinView  (replaces the normal image grid)
+              └─ library.kinMatches      ← Finds images related to the selected one
+                    ├─ inspectorMetadata ← Reads source image's metadata
+                    ├─ allImages         ← Flat list of every image in the library
+                    └─ [groups by relationship type:]
+                          ├─ same folder (batch siblings)
+                          ├─ same seed value
+                          ├─ same model
+                          └─ similar prompt keywords
+              ├─ groupedKinMatches       ← Sorts groups (folder first, etc.)
+              └─ kinThumbnail            ← Renders each match with its relationship label
+                    └─ selectKinMatch    ← On click: navigates to that image's real folder
+                          ├─ library.selectCategory
+                          └─ library.selectImage</pre></div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════ S7: UTILITIES ═══════════════════════════ -->
+<section id="s7">
+  <h2><span class="num">7</span> Key Shared Utilities</h2>
+  <p>These functions are called from many different loops — they're the "plumbing" that keeps everything consistent after any change.</p>
+  <div class="table-wrap">
+    <table>
+      <tr><th>Function</th><th>File</th><th>What it does</th><th>Called after…</th></tr>
+      <tr><td><code>rebuildCategories</code></td><td>LibraryStore</td><td>Re-assembles the full sidebar list (folders + Favorites + Filtered + Smart Filters)</td><td>Almost every data change</td></tr>
+      <tr><td><code>validCategoryID</code></td><td>LibraryStore</td><td>Checks selected folder still exists; falls back to first if not</td><td>Deletes, folder removal</td></tr>
+      <tr><td><code>validImageID</code></td><td>LibraryStore</td><td>Checks selected image still exists; falls back to first if not</td><td>Any delete</td></tr>
+      <tr><td><code>persistSelectedCategoryID</code></td><td>LibraryStore</td><td>Saves current folder to UserDefaults (survives restart)</td><td>Every selection change</td></tr>
+      <tr><td><code>removeDeletedFromSearch</code></td><td>ContentView</td><td>Removes a trashed image from the live search results list</td><td>Any trash action</td></tr>
+      <tr><td><code>syncPreviewSession</code></td><td>ContentView</td><td>Keeps the preview overlay window in sync with current selection</td><td>Selection changes, drag-drop</td></tr>
+      <tr><td><code>relinquishSearchFocus</code></td><td>ContentView</td><td>Moves keyboard cursor out of the search text field</td><td>Before any navigation action</td></tr>
+      <tr><td><code>clearMultiSelection</code></td><td>ContentView</td><td>Deselects all shift/cmd-clicked images</td><td>Before single-click or search</td></tr>
+      <tr><td><code>endDiffMode</code></td><td>ContentView</td><td>Closes the side-by-side image comparison view</td><td>Before folder navigation</td></tr>
+    </table>
+  </div>
+</section>
+
+<!-- ═══════════════════════════ S8: PRINCIPLES ═══════════════════════════ -->
+<section id="s8">
+  <h2><span class="num">8</span> Design Principles</h2>
+  <p>These are the architectural decisions that explain <em>why</em> the code is structured the way it is.</p>
+  <div class="principles">
+    <div class="principle">
+      <div class="p-num">Principle 1</div>
+      <h4>One source of truth</h4>
+      <p><code>LibraryStore</code> owns all data. <code>ContentView</code> only reads from it and sends user actions to it — the UI never modifies data directly. This prevents "split brain" where different parts of the UI show inconsistent state.</p>
+    </div>
+    <div class="principle">
+      <div class="p-num">Principle 2</div>
+      <h4>Reactive UI — no manual refresh</h4>
+      <p>ContentView uses SwiftUI's observation system: it automatically redraws whenever any <code>@Published</code> property in LibraryStore changes. There is no "refresh" button or explicit update call anywhere in the codebase.</p>
+    </div>
+    <div class="principle">
+      <div class="p-num">Principle 3</div>
+      <h4>Background work never blocks the UI</h4>
+      <p>Folder scanning, metadata indexing, searching, and image loading all run asynchronously. The app is always responsive. Progress indicators show when work is happening. Images appear from memory while SQLite is still being built in the background.</p>
+    </div>
+    <div class="principle">
+      <div class="p-num">Principle 4</div>
+      <h4>Three-speed data access</h4>
+      <p><span class="speed-instant">Instant (0ms)</span> — in-memory lists for browsing.<br>
+      <span class="speed-fast">Fast (&lt;50ms)</span> — SQLite for searching and filtering.<br>
+      <span class="speed-slow">Slow (seconds)</span> — reading image files from disk (only on first scan or when modified).</p>
+    </div>
+    <div class="principle">
+      <div class="p-num">Principle 5</div>
+      <h4>Graceful degradation</h4>
+      <p>Every metadata reader has a fallback chain: embedded PNG data → sidecar .txt file → folder JSON/CFG → show nothing gracefully. If a ComfyUI workflow is too complex to parse, it is silently skipped rather than crashing or showing garbage.</p>
+    </div>
+    <div class="principle">
+      <div class="p-num">Principle 6</div>
+      <h4>Schema changes are self-healing</h4>
+      <p>When a new column is added to the SQLite database, the app detects it at startup, adds the column, then zeros all <code>mod_date</code> values — forcing every image to be re-read and the new column populated automatically. No manual migration steps needed.</p>
+    </div>
+    <div class="principle">
+      <div class="p-num">Principle 7</div>
+      <h4>Keyboard navigation stays out of its own way</h4>
+      <p><code>KeyHandlingView</code> only intercepts keyboard events when no text field has focus. Arrow keys navigate images when you're browsing, but type normally when the cursor is in the search box.</p>
+    </div>
+  </div>
+</section>
+
+<footer style="text-align:center; padding:40px; color:#1e293b; font-size:12px;">
+  AiGallery Design Document · Generated May 2026
+</footer>
+
+</body>
+</html>
