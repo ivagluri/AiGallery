@@ -927,7 +927,7 @@ struct ContentView: View {
             .buttonStyle(InspectorActionButtonStyle())
             .help(isCompareModeActive ? "Stop Comparing" : "Compare with Another Image")
 
-            Button { library.trashImage(image) } label: {
+            Button { library.trashImage(image); removeDeletedFromSearch([image.id]) } label: {
                 Image(systemName: "trash")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(Color.red.opacity(0.7))
@@ -1626,7 +1626,7 @@ struct ContentView: View {
             onStartSlideshow: { launchSlideshow(startingAt: match.image) },
             onToggleFavorite: { library.toggleFavorite(match.image) },
             onToggleHidden: { toggleImageHidden(match.image) },
-            onTrash: { library.trashImage(match.image) }
+            onTrash: { library.trashImage(match.image); removeDeletedFromSearch([match.image.id]) }
         )
         .help(match.reasons.map(\.rawValue).joined(separator: " · "))
     }
@@ -2159,6 +2159,7 @@ private func isCollapsedActiveNode(_ node: SidebarNode) -> Bool {
             confirmAndTrashMultiSelection()
         } else {
             library.trashImage(image)
+            removeDeletedFromSearch([image.id])
         }
     }
 
@@ -2167,7 +2168,10 @@ private func isCollapsedActiveNode(_ node: SidebarNode) -> Bool {
         if let pid = primarySelectedImageID { ids.insert(pid) }
         let images = displayImages.filter { ids.contains($0.id) }
         guard images.count > 1 else {
-            if let single = images.first { library.trashImage(single) }
+            if let single = images.first {
+                library.trashImage(single)
+                removeDeletedFromSearch([single.id])
+            }
             return
         }
         if suppressMultiDeleteConfirm {
@@ -2191,6 +2195,26 @@ private func isCollapsedActiveNode(_ node: SidebarNode) -> Bool {
     private func performMultiDelete(_ images: [ImageItem]) {
         clearMultiSelection()
         library.trashImages(images)
+        removeDeletedFromSearch(Set(images.map(\.id)))
+    }
+
+    private func trashFromViewer() {
+        guard let image = displayedSelectedImage else { return }
+        library.trashImage(image)
+        removeDeletedFromSearch([image.id])
+        if displayedSelectedImage == nil {
+            previewController.dismiss()
+        }
+    }
+
+    private func removeDeletedFromSearch(_ ids: Set<ImageItem.ID>) {
+        guard isSearching else { return }
+        let filtered = activeSearchResults.images.filter { !ids.contains($0.id) }
+        let removed = activeSearchResults.images.count - filtered.count
+        activeSearchResults = SearchResult(
+            images: filtered,
+            totalMatches: max(0, activeSearchResults.totalMatches - removed)
+        )
     }
 
     private func handleKeyEvent(_ event: NSEvent) -> Bool {
@@ -2380,6 +2404,7 @@ private func isCollapsedActiveNode(_ node: SidebarNode) -> Bool {
             confirmAndTrashMultiSelection()
         } else if let image = displayedSelectedImage {
             library.trashImage(image)
+            removeDeletedFromSearch([image.id])
         }
 
         return nil
@@ -2575,6 +2600,9 @@ private func isCollapsedActiveNode(_ node: SidebarNode) -> Bool {
                 guard let image = displayedSelectedImage else { return }
                 library.toggleFavorite(image)
                 syncPreviewSession()
+            },
+            onTrash: isDroppedInspection ? nil : {
+                trashFromViewer()
             },
             onStartSlideshow: isDroppedInspection ? nil : {
                 launchSlideshow(startingAt: displayedSelectedImage)
@@ -3534,65 +3562,66 @@ private struct PromptDisclosureBlock: View {
         NSWorkspace.shared.activateFileViewerSelecting([url])
     }
 
+// Shared async image loader. Manages cache-check-on-appear + task-based loading.
+// Rendering is delegated to the content closure so callers control layout and placeholders.
+private struct AsyncImageContent<Content: View>: View {
+    let imageURL: URL
+    let maximumPixelDimension: Int
+    let isSuspended: Bool
+    @ViewBuilder let content: (SafeImageLoader.LoadResult?) -> Content
+
+    @State private var loadResult: SafeImageLoader.LoadResult?
+
+    var body: some View {
+        content(loadResult)
+            .onAppear {
+                if loadResult == nil,
+                   let cached = SafeImageLoader.cachedImage(for: imageURL, maximumThumbnailDimension: maximumPixelDimension) {
+                    loadResult = .success(cached)
+                }
+            }
+            .task(id: "\(imageURL.path)#\(maximumPixelDimension)#\(isSuspended)") {
+                if isSuspended {
+                    if loadResult == nil,
+                       let cached = SafeImageLoader.cachedImage(for: imageURL, maximumThumbnailDimension: maximumPixelDimension) {
+                        loadResult = .success(cached)
+                    }
+                    return
+                }
+                if let cached = SafeImageLoader.cachedImage(for: imageURL, maximumThumbnailDimension: maximumPixelDimension) {
+                    loadResult = .success(cached)
+                    return
+                }
+                let result = await SafeImageLoader.loadImageAsync(for: imageURL, maximumThumbnailDimension: maximumPixelDimension)
+                guard !Task.isCancelled else { return }
+                loadResult = result
+            }
+    }
+}
+
 private struct ThumbnailImage: View {
     let imageURL: URL
     let maximumPixelDimension: Int
     let isSuspended: Bool
     let squareCrop: Bool
-    @State private var loadResult: SafeImageLoader.LoadResult?
 
     var body: some View {
-        Group {
-            switch loadResult {
-            case .success(let nsImage):
-                Image(nsImage: nsImage)
-                    .resizable()
-                    .interpolation(.high)
-                    .aspectRatio(contentMode: squareCrop ? .fill : .fit)
-            case .blocked:
-                PlaceholderView(title: "", systemImage: "shield")
-            case .failed:
-                PlaceholderView(title: "No Preview", systemImage: "photo")
-            case .none:
-                Color.clear
-            }
-        }
-        .onAppear {
-            if loadResult == nil,
-               let cachedImage = SafeImageLoader.cachedImage(
-                for: imageURL,
-                maximumThumbnailDimension: maximumPixelDimension
-               ) {
-                loadResult = .success(cachedImage)
-            }
-        }
-        .task(id: "\(imageURL.path)#\(maximumPixelDimension)#\(isSuspended)") {
-            if isSuspended {
-                if loadResult == nil,
-                   let cachedImage = SafeImageLoader.cachedImage(
-                    for: imageURL,
-                    maximumThumbnailDimension: maximumPixelDimension
-                   ) {
-                    loadResult = .success(cachedImage)
+        AsyncImageContent(imageURL: imageURL, maximumPixelDimension: maximumPixelDimension, isSuspended: isSuspended) { loadResult in
+            Group {
+                switch loadResult {
+                case .success(let nsImage):
+                    Image(nsImage: nsImage)
+                        .resizable()
+                        .interpolation(.high)
+                        .aspectRatio(contentMode: squareCrop ? .fill : .fit)
+                case .blocked:
+                    PlaceholderView(title: "", systemImage: "shield")
+                case .failed:
+                    PlaceholderView(title: "No Preview", systemImage: "photo")
+                case .none:
+                    Color.clear
                 }
-                return
             }
-
-            if let cachedImage = SafeImageLoader.cachedImage(
-                for: imageURL,
-                maximumThumbnailDimension: maximumPixelDimension
-            ) {
-                loadResult = .success(cachedImage)
-                return
-            }
-
-            let result = await SafeImageLoader.loadImageAsync(
-                for: imageURL,
-                maximumThumbnailDimension: maximumPixelDimension
-            )
-            guard !Task.isCancelled else { return }
-
-            loadResult = result
         }
     }
 }
@@ -3632,53 +3661,28 @@ private struct CollapsibleInspectorRow: View {
 
 private struct LargePreview: View {
     let imageURL: URL
-    @State private var loadResult: SafeImageLoader.LoadResult?
 
     var body: some View {
-        Group {
-            switch loadResult {
-            case .success(let nsImage):
-                Image(nsImage: nsImage)
-                    .resizable()
-                    .interpolation(.high)
-                    .scaledToFit()
-                    .clipShape(RoundedRectangle(cornerRadius: 14))
-            case .blocked(let reason):
-                PlaceholderView(title: reason.title, systemImage: "shield", description: reason.message)
-                    .frame(height: 260)
-            case .failed:
-                PlaceholderView(title: "No Preview", systemImage: "photo")
-                    .frame(height: 260)
-            case .none:
-                Color.clear
-                    .frame(height: 260)
+        AsyncImageContent(imageURL: imageURL, maximumPixelDimension: 2_048, isSuspended: false) { loadResult in
+            Group {
+                switch loadResult {
+                case .success(let nsImage):
+                    Image(nsImage: nsImage)
+                        .resizable()
+                        .interpolation(.high)
+                        .scaledToFit()
+                        .clipShape(RoundedRectangle(cornerRadius: 14))
+                case .blocked(let reason):
+                    PlaceholderView(title: reason.title, systemImage: "shield", description: reason.message)
+                        .frame(height: 260)
+                case .failed:
+                    PlaceholderView(title: "No Preview", systemImage: "photo")
+                        .frame(height: 260)
+                case .none:
+                    Color.clear
+                        .frame(height: 260)
+                }
             }
-        }
-        .onAppear {
-            if loadResult == nil,
-               let cachedImage = SafeImageLoader.cachedImage(
-                for: imageURL,
-                maximumThumbnailDimension: 2_048
-               ) {
-                loadResult = .success(cachedImage)
-            }
-        }
-        .task(id: imageURL.path) {
-            if let cachedImage = SafeImageLoader.cachedImage(
-                for: imageURL,
-                maximumThumbnailDimension: 2_048
-            ) {
-                loadResult = .success(cachedImage)
-                return
-            }
-
-            let result = await SafeImageLoader.loadImageAsync(
-                for: imageURL,
-                maximumThumbnailDimension: 2_048
-            )
-            guard !Task.isCancelled else { return }
-
-            loadResult = result
         }
     }
 }

@@ -73,6 +73,15 @@ enum SlideshowOverlayPreset: String, CaseIterable {
         case .fullPrompt: return "Prompt"
         }
     }
+
+    var next: SlideshowOverlayPreset {
+        switch self {
+        case .none:       return .filename
+        case .filename:   return .basicInfo
+        case .basicInfo:  return .fullPrompt
+        case .fullPrompt: return .none
+        }
+    }
 }
 
 enum SlideshowPromptContent: String, CaseIterable {
@@ -209,7 +218,7 @@ struct SlideshowSettingsSnapshot {
     let nsBackgroundColor: NSColor
     let transition: SlideshowTransition
     let overlayEnabled: Bool
-    let overlayPreset: SlideshowOverlayPreset
+    var overlayPreset: SlideshowOverlayPreset
     let overlayPosition: SlideshowOverlayPosition
     let promptContent: SlideshowPromptContent
 

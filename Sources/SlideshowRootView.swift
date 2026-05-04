@@ -87,6 +87,14 @@ struct SlideshowRootView: View {
             controller.advance()
             controller.resetTimer()
             return true
+        case 3: // F — toggle favorite
+            if let image = viewModel.currentImage {
+                controller.metadataSource?.toggleFavorite(image)
+            }
+            return true
+        case 35: // P — cycle info overlay
+            controller.cycleOverlayPreset()
+            return true
         default:
             return false
         }
@@ -298,20 +306,17 @@ struct SlideshowOverlayView: View {
         case .fullPrompt:
             let pos = metadata?.prompt ?? ""
             let neg = metadata?.negativePrompt ?? ""
-            let model = metadata?.param("Model") ?? ""
             var sections: [String] = []
             switch promptContent {
             case .positive:
                 if !pos.isEmpty { sections.append(pos) }
             case .negative:
-                if !neg.isEmpty { sections.append("[\(neg)]") }
+                if !neg.isEmpty { sections.append(neg) }
             case .both:
                 if !pos.isEmpty { sections.append(pos) }
-                if !neg.isEmpty { sections.append("[\(neg)]") }
+                if !neg.isEmpty { sections.append(neg) }
             }
-            let footer = [image.displayName, model].filter { !$0.isEmpty }.joined(separator: " · ")
-            if !footer.isEmpty { sections.append(footer) }
-            return sections.isEmpty ? image.displayName : sections.joined(separator: "\n\n")
+            return sections.isEmpty ? nil : sections.joined(separator: "\n\n")
         }
     }
 

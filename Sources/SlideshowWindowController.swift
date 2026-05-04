@@ -142,6 +142,12 @@ final class SlideshowWindowController: NSObject, NSWindowDelegate {
         scheduleTimer()
     }
 
+    func cycleOverlayPreset() {
+        let next = viewModel.settings.overlayPreset.next
+        viewModel.settings.overlayPreset = next
+        SlideshowSettings.shared.overlayPreset = next
+    }
+
     // MARK: - Timer
 
     private func scheduleTimer() {

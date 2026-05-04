@@ -16,13 +16,13 @@ enum JpegMetadataReader {
         if let exif = props[kCGImagePropertyExifDictionary] as? [CFString: Any],
            let raw = exif[kCGImagePropertyExifUserComment] as? String {
             let text = stripExifCharsetPrefix(raw)
-            if let meta = PNGInfoReader.readInfotext(text) { return meta }
+            if let meta = MetadataReader.read(infotext: text) { return meta }
         }
 
         // TIFF ImageDescription — fallback used by some tools
         if let tiff = props[kCGImagePropertyTIFFDictionary] as? [CFString: Any],
            let desc = tiff[kCGImagePropertyTIFFImageDescription] as? String {
-            if let meta = PNGInfoReader.readInfotext(desc) { return meta }
+            if let meta = MetadataReader.read(infotext: desc) { return meta }
         }
 
         return nil
