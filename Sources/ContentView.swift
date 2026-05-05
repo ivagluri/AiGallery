@@ -2732,29 +2732,35 @@ private func isCollapsedActiveNode(_ node: SidebarNode) -> Bool {
             return false
         }
 
-        loadFirstDroppedPNG(from: fileProviders, at: 0)
+        loadFirstDroppedImage(from: fileProviders, at: 0)
         return true
     }
 
-    private func loadFirstDroppedPNG(from providers: [NSItemProvider], at index: Int) {
+    private func loadFirstDroppedImage(from providers: [NSItemProvider], at index: Int) {
         guard providers.indices.contains(index) else {
             return
         }
 
-        providers[index].loadDataRepresentation(forTypeIdentifier: UTType.fileURL.identifier) { data, _ in
-            guard let data else {
-                loadFirstDroppedPNG(from: providers, at: index + 1)
-                return
+        providers[index].loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { item, _ in
+            let fileURL: URL?
+            if let url = item as? URL {
+                fileURL = url
+            } else if let data = item as? Data {
+                fileURL = URL(dataRepresentation: data, relativeTo: nil)
+                    ?? String(data: data, encoding: .utf8)
+                        .flatMap { URL(string: $0.trimmingCharacters(in: .whitespacesAndNewlines)) }
+            } else {
+                fileURL = nil
             }
 
-            guard let fileURL = URL(dataRepresentation: data, relativeTo: nil) else {
-                loadFirstDroppedPNG(from: providers, at: index + 1)
+            guard let fileURL else {
+                loadFirstDroppedImage(from: providers, at: index + 1)
                 return
             }
 
             Task { @MainActor in
                 if !openDroppedInspection(for: fileURL) {
-                    loadFirstDroppedPNG(from: providers, at: index + 1)
+                    loadFirstDroppedImage(from: providers, at: index + 1)
                 }
             }
         }

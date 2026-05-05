@@ -626,7 +626,7 @@ final class LibraryStore: ObservableObject {
     }
 
     func temporaryInspectionImage(for fileURL: URL) -> ImageItem? {
-        guard fileURL.pathExtension.lowercased() == "png", Self.isSupportedImage(fileURL) else { return nil }
+        guard Self.isSupportedImage(fileURL) else { return nil }
         return Self.makeImageItem(from: fileURL, profile: GeneralLibraryProfile())
     }
 
