@@ -927,7 +927,7 @@ struct ContentView: View {
             .buttonStyle(InspectorActionButtonStyle())
             .help(isCompareModeActive ? "Stop Comparing" : "Compare with Another Image")
 
-            Button { library.trashImage(image); removeDeletedFromSearch([image.id]) } label: {
+            Button { trashImageWithSuccessor(image) } label: {
                 Image(systemName: "trash")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(Color.red.opacity(0.7))
@@ -1626,7 +1626,7 @@ struct ContentView: View {
             onStartSlideshow: { launchSlideshow(startingAt: match.image) },
             onToggleFavorite: { library.toggleFavorite(match.image) },
             onToggleHidden: { toggleImageHidden(match.image) },
-            onTrash: { library.trashImage(match.image); removeDeletedFromSearch([match.image.id]) }
+            onTrash: { trashImageWithSuccessor(match.image) }
         )
         .help(match.reasons.map(\.rawValue).joined(separator: " · "))
     }
@@ -2158,8 +2158,7 @@ private func isCollapsedActiveNode(_ node: SidebarNode) -> Bool {
         if !multiSelectedImageIDs.isEmpty && isInGroup {
             confirmAndTrashMultiSelection()
         } else {
-            library.trashImage(image)
-            removeDeletedFromSearch([image.id])
+            trashImageWithSuccessor(image)
         }
     }
 
@@ -2169,8 +2168,7 @@ private func isCollapsedActiveNode(_ node: SidebarNode) -> Bool {
         let images = displayImages.filter { ids.contains($0.id) }
         guard images.count > 1 else {
             if let single = images.first {
-                library.trashImage(single)
-                removeDeletedFromSearch([single.id])
+                trashImageWithSuccessor(single)
             }
             return
         }
@@ -2194,20 +2192,46 @@ private func isCollapsedActiveNode(_ node: SidebarNode) -> Bool {
 
     private func performMultiDelete(_ images: [ImageItem]) {
         clearMultiSelection()
-        library.trashImages(images)
-        removeDeletedFromSearch(Set(images.map(\.id)))
+        trashImagesWithSuccessor(images)
     }
 
     private func trashFromViewer() {
         guard let image = displayedSelectedImage else { return }
-        library.trashImage(image)
-        removeDeletedFromSearch([image.id])
+        trashImageWithSuccessor(image)
         if displayedSelectedImage == nil {
             previewController.dismiss()
         }
     }
 
-    private func removeDeletedFromSearch(_ ids: Set<ImageItem.ID>) {
+    private func successorImageID(deletingIDs: Set<ImageItem.ID>) -> ImageItem.ID? {
+        let current = displayImages
+        var lastDeletedIndex: Int?
+        for (i, item) in current.enumerated() where deletingIDs.contains(item.id) {
+            lastDeletedIndex = i
+        }
+        guard let pivot = lastDeletedIndex else { return nil }
+        for i in (pivot + 1)..<current.count where !deletingIDs.contains(current[i].id) {
+            return current[i].id
+        }
+        return current[..<pivot].last { !deletingIDs.contains($0.id) }?.id
+    }
+
+    private func trashImageWithSuccessor(_ image: ImageItem) {
+        let successor = successorImageID(deletingIDs: [image.id])
+        library.trashImage(image)
+        removeDeletedFromSearch([image.id], successorID: successor)
+        if !isSearching { library.selectedImageID = successor }
+    }
+
+    private func trashImagesWithSuccessor(_ images: [ImageItem]) {
+        let ids = Set(images.map(\.id))
+        let successor = successorImageID(deletingIDs: ids)
+        library.trashImages(images)
+        removeDeletedFromSearch(ids, successorID: successor)
+        if !isSearching { library.selectedImageID = successor }
+    }
+
+    private func removeDeletedFromSearch(_ ids: Set<ImageItem.ID>, successorID: ImageItem.ID? = nil) {
         guard isSearching else { return }
         let filtered = activeSearchResults.images.filter { !ids.contains($0.id) }
         let removed = activeSearchResults.images.count - filtered.count
@@ -2215,6 +2239,9 @@ private func isCollapsedActiveNode(_ node: SidebarNode) -> Bool {
             images: filtered,
             totalMatches: max(0, activeSearchResults.totalMatches - removed)
         )
+        if let successorID, filtered.contains(where: { $0.id == successorID }) {
+            searchSelectedImageID = successorID
+        }
     }
 
     private func handleKeyEvent(_ event: NSEvent) -> Bool {
@@ -2403,8 +2430,7 @@ private func isCollapsedActiveNode(_ node: SidebarNode) -> Bool {
         if !multiSelectedImageIDs.isEmpty {
             confirmAndTrashMultiSelection()
         } else if let image = displayedSelectedImage {
-            library.trashImage(image)
-            removeDeletedFromSearch([image.id])
+            trashImageWithSuccessor(image)
         }
 
         return nil
