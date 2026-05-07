@@ -1,5 +1,15 @@
 # Changelog
 
+## Midsteam Updates 
+
+### 6/5/26
+
+- **image culling** - added a rudimentary culling feature using dHash comparison for "near neighbours". blunt instrument but it works somewhat.  
+
+### 4/5/26
+
+- **drag+drop info view update** - originally hardcoded to only accept PNG files for drag and drop info view, updated to support jpg and webp as well since the program also supports them.  full info display.
+
 ## v3.0
 
 - **Delete from image viewer** — press Backspace while the fullscreen viewer is open to move the current image to trash. The viewer advances to the next image automatically; dismisses if it was the last one.
