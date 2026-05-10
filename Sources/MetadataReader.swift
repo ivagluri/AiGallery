@@ -449,7 +449,7 @@ enum MetadataReader {
             let nodes = json as? [String: [String: Any]]
         else { return nil }
 
-        let samplerNode = preferredSamplerNode(in: nodes)
+        let samplerNode = primarySamplerNode(in: nodes)
         let positivePrompt = samplerNode.flatMap { nodeText(forInput: "positive", in: $0, nodes: nodes) }?.nilIfEmpty
         let negativePrompt = samplerNode.flatMap { nodeText(forInput: "negative", in: $0, nodes: nodes) }?.nilIfEmpty
 
@@ -459,6 +459,9 @@ enum MetadataReader {
         }
         if let samplerNode {
             appendParameter(named: "Seed", input: "seed", from: samplerNode, into: &parameters)
+            if !parameters.contains(where: { $0.keyword == "Seed" }) {
+                appendParameter(named: "Seed", input: "noise_seed", from: samplerNode, into: &parameters)
+            }
             appendParameter(named: "Steps", input: "steps", from: samplerNode, into: &parameters)
             appendParameter(named: "CFG Scale", input: "cfg", from: samplerNode, into: &parameters)
             appendParameter(named: "Sampler", input: "sampler_name", from: samplerNode, into: &parameters)
@@ -752,11 +755,25 @@ enum MetadataReader {
 
     // MARK: - ComfyUI node helpers
 
-    private static func preferredSamplerNode(in nodes: [String: [String: Any]]) -> [String: Any]? {
-        for type in ["KSampler", "KSamplerAdvanced", "SamplerCustom", "SamplerCustomAdvanced"] {
-            if let node = nodes.values.first(where: { classType(of: $0) == type }) { return node }
+    private static let samplerScoreFields: Set<String> = [
+        "seed", "noise_seed", "steps", "cfg", "sampler_name", "scheduler", "denoise"
+    ]
+
+    private static func primarySamplerNode(in nodes: [String: [String: Any]]) -> [String: Any]? {
+        var best: [String: Any]? = nil
+        var bestScore = 0
+        for node in nodes.values {
+            let nodeInputs = inputs(of: node)
+            let score = samplerScoreFields.filter { key in
+                guard let val = nodeInputs[key] else { return false }
+                return !(val is [Any])
+            }.count
+            if score > bestScore {
+                bestScore = score
+                best = node
+            }
         }
-        return nil
+        return bestScore > 0 ? best : nil
     }
 
     private static func classType(of node: [String: Any]) -> String? { node["class_type"] as? String }
