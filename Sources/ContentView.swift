@@ -500,6 +500,7 @@ struct ContentView: View {
                     toggleGroupExpansion(group.id)
                     if isUnloaded, isGroupExpanded(group.id), let rootURL = group.sourceRootURL {
                         library.loadRoot(rootURL)
+                        pendingNavigationRootURL = rootURL
                     }
                 } label: {
                     Group {

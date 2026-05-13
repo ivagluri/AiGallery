@@ -450,7 +450,7 @@ enum MetadataReader {
         else { return nil }
 
         let samplerNode = primarySamplerNode(in: nodes)
-        let positivePrompt = samplerNode.flatMap { nodeText(forInput: "positive", in: $0, nodes: nodes) }?.nilIfEmpty
+        let positivePrompt = (directPositivePrompt(in: nodes) ?? samplerNode.flatMap { nodeText(forInput: "positive", in: $0, nodes: nodes) })?.nilIfEmpty
         let negativePrompt = samplerNode.flatMap { nodeText(forInput: "negative", in: $0, nodes: nodes) }?.nilIfEmpty
 
         var parameters: [PNGTextEntry] = []
@@ -754,6 +754,21 @@ enum MetadataReader {
     }
 
     // MARK: - ComfyUI node helpers
+
+    private static func directPositivePrompt(in nodes: [String: [String: Any]]) -> String? {
+        let candidates: [(classType: String, fields: [String])] = [
+            ("ImpactWildcardProcessor", ["populated_text", "wildcard_text"]),
+            ("DPRandomGenerator", ["text"]),
+        ]
+        for (ct, fields) in candidates {
+            if let node = nodes.values.first(where: { classType(of: $0) == ct }) {
+                for field in fields {
+                    if let text = stringInput(named: field, in: node) { return text }
+                }
+            }
+        }
+        return nil
+    }
 
     private static let samplerScoreFields: Set<String> = [
         "seed", "noise_seed", "steps", "cfg", "sampler_name", "scheduler", "denoise"
