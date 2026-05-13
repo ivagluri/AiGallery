@@ -116,10 +116,10 @@ final class LibraryStore: ObservableObject {
             selectedImageID = nil
         }
 
-        // Background-index non-active roots immediately; active root is indexed
-        // after performInitialLoad populates its searchIndex.
+        // Eagerly load all non-active roots in background; each loadRoot call
+        // runs the directory scan then kicks off its own SQLite indexing pass.
         for url in persistedURLs where url != activeURL {
-            startBackgroundIndexing(for: url)
+            Task { [weak self] in self?.loadRoot(url) }
         }
     }
 
@@ -180,9 +180,9 @@ final class LibraryStore: ObservableObject {
                 )
             }
 
-        // Add placeholder groups for registered-but-unloaded roots
+        // Add placeholder groups for roots that are currently loading (brief startup window).
         let loadedGroupIDs = Set(groups.map(\.id))
-        for url in rootURLs {
+        for url in loadingRootURLs {
             let hash = rootURLHash(url)
             guard !loadedGroupIDs.contains(hash) else { continue }
             groups.append(CategoryGroup(
@@ -339,15 +339,12 @@ final class LibraryStore: ObservableObject {
 
             if added {
                 self.persistRootURLs()
-                // Background-index new roots immediately; category load is lazy
                 for url in panel.urls {
                     let standardized = url.standardizedFileURL
                     if !self.loadedRootURLs.contains(standardized) {
-                        self.startBackgroundIndexing(for: standardized)
+                        self.loadRoot(standardized)
                     }
                 }
-                // Trigger rebuildCategories so placeholder groups appear
-                self.rebuildCategories()
             }
             completion?(added)
         }

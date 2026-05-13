@@ -1,14 +1,13 @@
 # Changelog
 
-## Midsteam Updates 
+## v3.1
 
-### 6/5/26
-
-- **image culling** - added a rudimentary culling feature using dHash comparison for "near neighbours". blunt instrument but it works somewhat.  
-
-### 4/5/26
-
-- **drag+drop info view update** - originally hardcoded to only accept PNG files for drag and drop info view, updated to support jpg and webp as well since the program also supports them.  full info display.
+- **Image culling** — new option in Settings to find near-duplicate images using dHash perceptual comparison. Highlights close neighbours in the grid so you can review and cull without leaving the app.
+- **Drag-and-drop info view expanded** — the inspector drop zone now accepts JPEG and WebP files in addition to PNG, with full metadata display for all supported formats.
+- **Eager root loading** — all registered root folders now scan in parallel background tasks at startup instead of waiting for a first click. The sidebar shows brief spinners while each root loads, then all are immediately navigable. Removes the two-step load-then-navigate flow for secondary roots.
+- **Sidebar title click expands group** — clicking a root folder name in the sidebar now expands its subfolder tree at the same time as navigating to it, so roots that contain only subfolders no longer appear unresponsive on first click.
+- **ComfyUI metadata improvements** — additional workflow graph shapes are now parsed correctly; fixes a prompt regression introduced during the MetadataReader unification and resolves several remaining edge-case issues in prompt reconstruction.
+- **Selected item bug after delete fixed** — deleting an image no longer leaves a stale selection state in the grid.
 
 ## v3.0
 
@@ -36,7 +35,7 @@
 - **Image viewer info overlay** — press `p` while the image viewer is open to cycle through overlay modes: none → filename → basic info → full prompt. Reuses the slideshow overlay component, respects the slideshow position setting, and persists the last-used mode between sessions.
 - **A1111 scheduler parsing** — newer A1111 images emit `Schedule type` as a separate parameter (e.g. `Align Your Steps`). The metadata index now captures this correctly; previously the scheduler column was left null for these images.
 - **Draw Things upscaler indexing** — the upscaler field was extracted by the inspector but not written to the metadata index, so the Upscaler filter bar dropdown was always empty for Draw Things images. Now indexed from both the JSON blob and the alt-text parameters.
-- **Fixed crash on Rebuild Metadata Index** — a data race between `facetValues` reading `metadataIndexes` off the main actor and the background scan writing to it on the main actor caused a crash when the filter bar was active during a rebuild. Fixed by isolating all `metadataIndexes` accesses to the main actor.
+- **Fixed crash on Rebuild Metadata Index** — a data race between `facetValues` reading `metadataIndexes` off the main actor and the background scan writing to it on the main actor caused a crash when the filter bar was active during a rebuild. Fixed by isolating all `metadataIndexes` accesses to main actor.
 - **Folder-scoped metadata filter bar** — the Model / Sampler / Scheduler / VAE / Upscaler dropdowns now show only the values present in the currently selected folder, not across every loaded root. Facet counts update automatically as you navigate the sidebar.
 - **In-place metadata filtering** — active metadata filters mask the current view directly rather than navigating to a synthetic "Filtered" category. Switching folders, clearing filters, or changing the selection no longer causes unexpected navigation side-effects.
 - **Rebuild Metadata Index** — new button in Settings → Library. Wipes every root's indexed rows and re-parses all images from scratch. Use this when facet counts disagree with the actual file count after a parser improvement or a failed first-index. Distinct from the toolbar Reload (which stays incremental).
