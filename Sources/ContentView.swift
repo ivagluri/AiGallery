@@ -1797,10 +1797,17 @@ private func isCollapsedActiveNode(_ node: SidebarNode) -> Bool {
     }
 
     private func toggleImageHidden(_ image: ImageItem) {
-        if hiddenImageIDs.contains(image.id) {
-            hiddenImageIDs.remove(image.id)
-        } else {
-            hiddenImageIDs.insert(image.id)
+        var allIDs = multiSelectedImageIDs
+        if let pid = primarySelectedImageID { allIDs.insert(pid) }
+        if allIDs.isEmpty { allIDs.insert(image.id) }
+
+        let targetIsHidden = hiddenImageIDs.contains(image.id)
+        for id in allIDs {
+            if targetIsHidden {
+                hiddenImageIDs.remove(id)
+            } else {
+                hiddenImageIDs.insert(id)
+            }
         }
         UserDefaults.standard.set(Array(hiddenImageIDs), forKey: "hiddenImageIDs")
         pushExcludedPaths()
@@ -1934,11 +1941,11 @@ private func isCollapsedActiveNode(_ node: SidebarNode) -> Bool {
         }
 
         guard let selectedImageID = library.selectedImageID else {
-            return library.selectedCategory?.images.first
+            return displayImages.first
         }
 
-        return library.selectedCategory?.images.first(where: { $0.id == selectedImageID })
-            ?? library.selectedCategory?.images.first
+        return displayImages.first(where: { $0.id == selectedImageID })
+            ?? displayImages.first
     }
 
     private var primarySelectedImageID: ImageItem.ID? {
