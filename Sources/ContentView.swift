@@ -59,7 +59,6 @@ struct ContentView: View {
     @State private var hiddenImageIDs: Set<String> = {
         Set(UserDefaults.standard.stringArray(forKey: "hiddenImageIDs") ?? [])
     }()
-    @State private var pendingNavigationRootURL: URL?
 
     var body: some View {
         NavigationSplitView {
@@ -111,15 +110,6 @@ struct ContentView: View {
         .onChange(of: library.loadedRootURLs) { _ in
             expandAllGroupsIfNeeded()
             pushExcludedPaths()
-            if let pendingURL = pendingNavigationRootURL,
-               library.loadedRootURLs.contains(pendingURL) {
-                let rootCategory = library.categoryGroups
-                    .first { $0.sourceRootURL?.standardizedFileURL == pendingURL.standardizedFileURL }?
-                    .categories
-                    .first { $0.folderURL.standardizedFileURL == $0.sourceRootURL?.standardizedFileURL }
-                if let rootCategory { library.selectCategory(rootCategory) }
-                pendingNavigationRootURL = nil
-            }
         }
         .onChange(of: hiddenNodeIDs) { _ in pushExcludedPaths() }
         .onChange(of: hiddenImageIDs) { _ in pushExcludedPaths() }
@@ -490,18 +480,12 @@ struct ContentView: View {
         }
         let hasChildren = !sidebarNodes(for: group).isEmpty
         let isLoadingRoot = group.sourceRootURL.map { library.loadingRootURLs.contains($0) } ?? false
-        let isUnloaded = !group.isSynthetic && group.categories.isEmpty && !isLoadingRoot
-            && (group.sourceRootURL.map { !library.loadedRootURLs.contains($0) } ?? false)
         return HStack(spacing: 0) {
-            // Chevron — only when there are children, still loading, or not yet loaded
-            if hasChildren || isLoadingRoot || isUnloaded {
+            // Chevron — only when there are children or still loading at startup
+            if hasChildren || isLoadingRoot {
                 Button {
                     guard !isLoadingRoot else { return }
                     toggleGroupExpansion(group.id)
-                    if isUnloaded, isGroupExpanded(group.id), let rootURL = group.sourceRootURL {
-                        library.loadRoot(rootURL)
-                        pendingNavigationRootURL = rootURL
-                    }
                 } label: {
                     Group {
                         if isLoadingRoot {
@@ -525,12 +509,10 @@ struct ContentView: View {
                     .padding(.vertical, 4)
             }
 
-            // Title — navigate only
+            // Title — navigate and expand
             Button {
-                if isUnloaded, let rootURL = group.sourceRootURL {
-                    if !isGroupExpanded(group.id) { toggleGroupExpansion(group.id) }
-                    library.loadRoot(rootURL)
-                    pendingNavigationRootURL = rootURL
+                if hasChildren && !isGroupExpanded(group.id) {
+                    toggleGroupExpansion(group.id)
                 }
                 if let rootCategory { library.selectCategory(rootCategory) }
             } label: {
