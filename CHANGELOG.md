@@ -1,5 +1,11 @@
 # Changelog
 
+## v3.2
+
+- **Fixed Multi select hide** - previously only one image could be hidden at a time
+- **fixed stale inspector on hide** - image now is removed from inspector if it is hidden from view and "show hidden images" is off
+- **Updated filter bar in search** - Filter bar now updates with search results and only shows metadata for current results, previously did not capture search results and only showed working folder metadata.
+
 ## v3.1
 
 - **Image culling** — new option in Settings to find near-duplicate images using dHash perceptual comparison. Highlights close neighbours in the grid so you can review and cull without leaving the app.

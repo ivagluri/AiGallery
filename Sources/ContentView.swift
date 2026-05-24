@@ -221,6 +221,10 @@ struct ContentView: View {
 
     private var facetLoadID: String {
         guard showFilterBar else { return "" }
+        if isSearching {
+            let imgs = activeSearchResults.images
+            return "search:\(imgs.count):\(imgs.first?.id ?? ""):\(imgs.last?.id ?? "")"
+        }
         return effectiveFilterScopeURL?.path ?? "global"
     }
 
@@ -1274,11 +1278,19 @@ struct ContentView: View {
 
     private func loadFacetValues() async {
         guard library.hasAnyMetadataIndex else { return }
-        let scopeURL = effectiveFilterScopeURL
         var result: [MetadataField: [(value: String, count: Int)]] = [:]
-        for field in MetadataField.allCases {
-            guard !Task.isCancelled else { return }
-            result[field] = await library.facetValues(for: field, scopedToFolder: scopeURL)
+        if isSearching {
+            let paths = Set(activeSearchResults.images.map(\.id))
+            for field in MetadataField.allCases {
+                guard !Task.isCancelled else { return }
+                result[field] = await library.facetValues(for: field, withinPaths: paths)
+            }
+        } else {
+            let scopeURL = effectiveFilterScopeURL
+            for field in MetadataField.allCases {
+                guard !Task.isCancelled else { return }
+                result[field] = await library.facetValues(for: field, scopedToFolder: scopeURL)
+            }
         }
         guard !Task.isCancelled else { return }
         facetValues = result

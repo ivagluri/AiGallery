@@ -163,6 +163,31 @@ actor MetadataIndex {
         return results
     }
 
+    func facetValues(for field: MetadataField, withinPaths paths: Set<String>) -> [(value: String, count: Int)] {
+        guard let db, !paths.isEmpty else { return [] }
+        let col = field.columnName
+        let placeholders = paths.map { _ in "?" }.joined(separator: ",")
+        let sql = """
+        SELECT \(col), COUNT(*) AS n FROM indexed_images
+        WHERE \(col) IS NOT NULL AND path IN (\(placeholders))
+        GROUP BY \(col) ORDER BY n DESC
+        """
+        var stmt: OpaquePointer?
+        var results: [(String, Int)] = []
+        if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
+            for (i, path) in paths.enumerated() {
+                sqlite3_bind_text(stmt, Int32(i + 1), path, -1, SQLITE_TRANSIENT)
+            }
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                let value = String(cString: sqlite3_column_text(stmt, 0))
+                let count = Int(sqlite3_column_int(stmt, 1))
+                results.append((value, count))
+            }
+        }
+        sqlite3_finalize(stmt)
+        return results
+    }
+
     func imagePaths(matching filters: [MetadataFilter], withinFolderPrefix prefix: String? = nil) -> Set<String> {
         guard let db, !filters.isEmpty else { return [] }
         let clauses = filters.map { "\($0.field.columnName) = ?" }.joined(separator: " AND ")

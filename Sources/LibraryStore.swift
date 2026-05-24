@@ -765,6 +765,16 @@ final class LibraryStore: ObservableObject {
         return merged.sorted { $0.value > $1.value }.map { (value: $0.key, count: $0.value) }
     }
 
+    @MainActor func facetValues(for field: MetadataField, withinPaths paths: Set<String>) async -> [(value: String, count: Int)] {
+        var merged: [String: Int] = [:]
+        for index in metadataIndexes.values {
+            for (value, count) in await index.facetValues(for: field, withinPaths: paths) {
+                merged[value, default: 0] += count
+            }
+        }
+        return merged.sorted { $0.value > $1.value }.map { (value: $0.key, count: $0.value) }
+    }
+
     // MARK: - Private helpers
 
     private static func loadImages(in folderURL: URL, profile: any LibraryProfile) throws -> [ImageItem] {
