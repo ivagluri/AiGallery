@@ -992,7 +992,14 @@ final class LibraryStore: ObservableObject {
 
     private func pruneFavoritesToExistingImages() {
         let validImageIDs = Set(sourceCategories.flatMap(\.images).map(\.id))
-        let filtered = favoriteImageIDs.intersection(validImageIDs)
+        // Only prune favorites that belong to roots which have fully loaded.
+        // Favorites from still-loading roots must not be discarded yet or they
+        // will be permanently lost when persistFavoriteImageIDs() overwrites disk.
+        let loadedRootPaths = loadedRootURLs.map { $0.standardizedFileURL.path }
+        let fromLoaded = favoriteImageIDs.filter { id in
+            loadedRootPaths.contains { rootPath in id.hasPrefix(rootPath + "/") || id == rootPath }
+        }
+        let filtered = fromLoaded.intersection(validImageIDs).union(favoriteImageIDs.subtracting(fromLoaded))
         guard filtered != favoriteImageIDs else { return }
         favoriteImageIDs = filtered
         persistFavoriteImageIDs()
