@@ -1,5 +1,10 @@
 # Changelog
 
+## v3.3
+
+- **Favorites persist across relaunches** - favorites from roots that are still loading are no longer pruned and overwritten during startup.
+- **Release versioning fixed** - default app bundles now stamp `CFBundleShortVersionString` and `CFBundleVersion` from the repo `VERSION` file, so release builds report `3.3` instead of the stale `2.1.1`.
+
 ## v3.2
 
 - **Fixed Multi select hide** - previously only one image could be hidden at a time

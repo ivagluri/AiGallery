@@ -4,11 +4,11 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APP_NAME="AiGallery"
-VERSION="${VERSION:-${version:-}}"
+ENV_VERSION="${VERSION:-${version:-}}"
 OUTPUT_NAME="$APP_NAME"
 
-if [[ -n "$VERSION" ]]; then
-  OUTPUT_NAME="$APP_NAME-$VERSION"
+if [[ -n "$ENV_VERSION" ]]; then
+  OUTPUT_NAME="$APP_NAME-$ENV_VERSION"
 fi
 
 "$ROOT_DIR/scripts/build-app.sh"
